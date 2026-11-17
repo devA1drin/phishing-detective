@@ -14,6 +14,8 @@ const TIMEOUT_COACH_MS = Number(process.env.AI_COACH_TIMEOUT_MS) || 7_000;
 // Deterministic offline stand-in for tests and local demos only (never on Vercel).
 const FAKE = process.env.AI_FAKE === '1' && !process.env.VERCEL;
 
+let coachPausedUntil = 0; // after a gateway failure the coach serves static tips for a while (no added latency)
+const COACH_COOLDOWN_MS = 5 * 60 * 1000;
 let lastError = null; // last gateway failure (shown to admins, no secrets)
 
 export function aiStatus(env = process.env, fake = FAKE) {
@@ -27,6 +29,7 @@ export function aiStatus(env = process.env, fake = FAKE) {
 const remember = (e) => {
   const msg = String(e?.message || e).replace(/(key|token)[^\s]*/gi, '$1…').slice(0, 300);
   lastError = { message: msg, at: new Date().toISOString() };
+  coachPausedUntil = Date.now() + COACH_COOLDOWN_MS;
   return msg;
 };
 
@@ -138,6 +141,7 @@ export async function coachText({ scenario, result, weak }) {
     missed.length ? `Red flags the player missed: ${missed.join(' | ')}` : 'The player found every red flag (or it was legit).',
     weak.length ? `The player's weakest areas overall: ${weak.map((w) => `${w.label} (misses ${Math.round(w.weakness * 100)}%)`).join(', ')}. Connect the tip to these if relevant.` : '',
   ].join('\n');
+  if (Date.now() < coachPausedUntil) return fallback;
   try {
     const { text } = await generateText({ model: AI_MODEL, prompt, abortSignal: AbortSignal.timeout(TIMEOUT_COACH_MS) });
     lastError = null;
