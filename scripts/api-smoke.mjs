@@ -44,6 +44,14 @@ try {
     await call('POST', `/sessions/${s.sessionId}/answers`, { scenarioId: sc.id, choice: t ? (t.isPhishing ? 'phishing' : 'legit') : 'phishing', timeMs: 6000, clickedParts: [] }, token);
   }
   const fin = await call('POST', `/sessions/${s.sessionId}/finish`, null, token); ok('round', `score ${fin.score}, accuracy ${fin.accuracy}%`);
+  // Phase 2: inbox mode + language filter + link trap
+  const inbox = await call('POST', '/sessions', { level: 1, mode: 'inbox', language: 'fil' }, token, 201);
+  ok('inbox (Filipino/Taglish)', `${inbox.scenarios.length} messages, ${inbox.inboxTimeLimit}s, languages ${[...new Set(inbox.scenarios.map((x) => x.language))].join('/')}`);
+  const withLink = inbox.scenarios.find((x) => x.links.length);
+  if (withLink) {
+    const lc = await call('POST', `/sessions/${inbox.sessionId}/link-click`, { scenarioId: withLink.id, index: 0, timeMs: 3000 }, token);
+    ok('link trap', lc.trap.phished ? `phished → ${lc.trap.title} (${lc.trap.host})` : `safe link (${lc.trap.host})`);
+  }
   const post = await call('GET', '/quiz/post');
   const postRes = await call('POST', '/quiz/post/submit', { answers: answers('post', post.items) }, token); ok('post-quiz', `${postRes.percent}% (pre ${postRes.prePercent}%)`);
   const prog = await call('GET', '/players/me/progress', null, token); ok('progress', `retention opens ${prog.retentionQuiz.unlocksAt}, surveys unlocked ${prog.surveys.unlocked}`);

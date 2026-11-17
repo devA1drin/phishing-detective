@@ -4,8 +4,10 @@ import { api } from '../lib/api.js';
 import { usePlayer } from '../lib/player.jsx';
 import MessageView from '../components/MessageView.jsx';
 import Timer from '../components/Timer.jsx';
+import { TrapOverlay, SafeLinkNote } from '../components/TrapOverlay.jsx';
+import { getPrefs } from '../lib/prefs.js';
 
-const channelLabel = { email: '📧 Email', sms: '💬 SMS', social: '📱 Social DM' };
+export const channelLabel = { email: '📧 Email', sms: '💬 SMS', social: '📱 Social DM', call: '📞 Call' };
 
 export default function Game() {
   const { level } = useParams();
@@ -20,6 +22,8 @@ export default function Game() {
   const [streak, setStreak] = useState(0);
   const [remaining, setRemaining] = useState(0);
   const [error, setError] = useState('');
+  const [trap, setTrap] = useState(null); // link-trap overlay or safe note
+  const [linkClicked, setLinkClicked] = useState(false);
   const startRef = useRef(0);
   const submittingRef = useRef(false);
   const started = useRef(false);
@@ -27,7 +31,7 @@ export default function Game() {
   useEffect(() => {
     if (started.current) return;
     started.current = true;
-    api.startSession(Number(level)).then(setSession).catch((e) => setError(e.message));
+    api.startSession(Number(level), { mode: 'classic', language: getPrefs().language }).then(setSession).catch((e) => setError(e.message));
   }, [player.id, level]);
 
   const scenario = session?.scenarios[idx];
@@ -49,22 +53,33 @@ export default function Game() {
     submittingRef.current = true;
     const timeMs = Math.round(performance.now() - startRef.current);
     try {
-      const r = await api.answer(session.sessionId, { scenarioId: scenario.id, choice, timeMs, clickedParts: [...marked] });
+      const r = await api.answer(session.sessionId, { scenarioId: scenario.id, choice, timeMs, clickedParts: [...marked], linkClicked });
       setFeedback(r);
       setScore(r.sessionScore);
       setStreak(r.streak);
     } catch (e) { setError(e.message); } finally { submittingRef.current = false; }
-  }, [scenario, feedback, session, marked]);
+  }, [scenario, feedback, session, marked, linkClicked]);
+
+  // Link trap: "open" a link or scanned QR (simulated; nothing real is opened)
+  const openLink = async (index) => {
+    if (!scenario || feedback || submittingRef.current) return;
+    submittingRef.current = true;
+    try {
+      const r = await api.linkClick(session.sessionId, { scenarioId: scenario.id, index, timeMs: Math.round(performance.now() - startRef.current), clickedParts: [...marked] });
+      setTrap(r.trap);
+      if (r.result) { setFeedback(r.result); setScore(r.result.sessionScore); setStreak(r.result.streak); } else setLinkClicked(true);
+    } catch (e) { setError(e.message); } finally { submittingRef.current = false; }
+  };
 
   // time out
   useEffect(() => {
-    if (scenario && !feedback && remaining <= 0 && performance.now() - startRef.current > 500) submit(null);
+    if (scenario && !feedback && !trap && remaining <= 0 && performance.now() - startRef.current > 500) submit(null);
   }, [remaining, scenario, feedback, submit]);
 
   // keyboard shortcuts
   useEffect(() => {
     const onKey = (e) => {
-      if (e.target.tagName === 'INPUT') return;
+      if (e.target.tagName === 'INPUT' || trap) return;
       if (!feedback && (e.key === 'p' || e.key === 'P')) submit('phishing');
       if (!feedback && (e.key === 'l' || e.key === 'L')) submit('legit');
       if (feedback && e.key === 'Enter') next();
@@ -77,7 +92,7 @@ export default function Game() {
 
   const next = async () => {
     if (idx < session.scenarios.length - 1) {
-      setIdx(idx + 1); setMarked(new Set()); setFeedback(null);
+      setIdx(idx + 1); setMarked(new Set()); setFeedback(null); setTrap(null); setLinkClicked(false);
       window.scrollTo({ top: 0, behavior: 'smooth' });
     } else {
       const s = await api.finish(session.sessionId);
@@ -99,6 +114,7 @@ export default function Game() {
 
   return (
     <div className="game">
+      {trap?.phished && <TrapOverlay trap={trap} onClose={() => setTrap(null)} />}
       <div className="game-hud card">
         <div className="hud-item"><span>Level</span><b>{session.level}</b></div>
         <div className="hud-item"><span>Case</span><b>{idx + 1}/{session.scenarios.length}</b></div>
@@ -112,9 +128,11 @@ export default function Game() {
           <div className="case-tag">
             <span className="pill">{channelLabel[scenario.channel]}</span>
             <span className="pill">Difficulty {'★'.repeat(scenario.difficulty)}</span>
+            {scenario.language !== 'en' && <span className="pill">🇵🇭 {scenario.language === 'tl' ? 'Filipino' : 'Taglish'}</span>}
             {!feedback && <span className="muted small hide-sm">🔍 Click anything suspicious for bonus points</span>}
           </div>
-          <MessageView scenario={scenario} marked={marked} onToggle={feedback ? null : toggle} reveal={reveal} />
+          <MessageView scenario={scenario} marked={marked} onToggle={feedback ? null : toggle} onOpenLink={feedback ? null : openLink} reveal={reveal} />
+          {trap && !trap.phished && !feedback && <SafeLinkNote trap={trap} onClose={() => setTrap(null)} />}
           {!feedback && (
             <div className="choice-row sticky">
               <button className="btn btn-red big" onClick={() => submit('phishing')}>🚩 Phishing <kbd>P</kbd></button>
@@ -131,7 +149,7 @@ export default function Game() {
                 <p className="small">You flagged {marked.size} part{marked.size > 1 ? 's' : ''}. Click again to un-flag.</p>
               )}
               <ul className="mini-tips small muted">
-                <li>Hover over links to reveal the real URL</li>
+                <li>Tap a link or QR code to inspect it. Opening a scam link loses the case!</li>
                 <li>Check the sender's exact domain/number</li>
                 <li>Watch for urgency, fees, OTP or password requests</li>
               </ul>
@@ -145,13 +163,13 @@ export default function Game() {
   );
 }
 
-function Feedback({ f, onNext, last }) {
+export function Feedback({ f, onNext, last }) {
   return (
     <div className={`card feedback ${f.isCorrect ? 'correct' : 'wrong'}`}>
       <div className="fb-head">
-        <div className="fb-icon">{f.isCorrect ? '✅' : f.timedOut ? '⏰' : '❌'}</div>
+        <div className="fb-icon">{f.isCorrect ? '✅' : f.phished ? '🎣' : f.timedOut ? '⏰' : '❌'}</div>
         <div>
-          <h3>{f.isCorrect ? 'Case solved!' : f.timedOut ? "Time's up!" : 'Not quite, Detective'}</h3>
+          <h3>{f.isCorrect ? 'Case solved!' : f.phished ? 'You opened the scam link' : f.timedOut ? "Time's up!" : 'Not quite, Detective'}</h3>
           <p>This message is <b className={f.isPhishing ? 'bad' : 'good'}>{f.isPhishing ? 'PHISHING' : 'LEGIT'}</b></p>
         </div>
         <div className="fb-points">+{f.points}<span>pts</span></div>
@@ -182,17 +200,17 @@ function Feedback({ f, onNext, last }) {
         </>
       )}
       <p className="explain">💡 {f.explanation}</p>
-      <button className="btn btn-gold block" onClick={onNext}>{last ? 'See round summary →' : 'Next case →'} <kbd>Enter</kbd></button>
+      {onNext && <button className="btn btn-gold block" onClick={onNext}>{last ? 'See round summary →' : 'Next case →'} <kbd>Enter</kbd></button>}
     </div>
   );
 }
 
-function Summary({ s, onAgain }) {
+export function Summary({ s, onAgain }) {
   const passed = s.accuracy >= s.unlockAccuracy;
   return (
     <div className="summary">
       <div className="card summary-head">
-        <span className="eyebrow">Level {s.level} · Round report</span>
+        <span className="eyebrow">Level {s.level} · {s.mode === 'inbox' ? 'Inbox' : 'Round'} report</span>
         <h1>{s.accuracy >= 90 ? 'Outstanding work, Detective! 🏅' : passed ? 'Case closed! 🕵️' : 'Keep training, Detective 🔍'}</h1>
         {s.newlyUnlocked && <div className="unlock-banner">🔓 Level {s.newlyUnlocked} unlocked!</div>}
         <div className="stat-row">
@@ -203,6 +221,7 @@ function Summary({ s, onAgain }) {
           <div className="stat"><b>{(s.avgTimeMs / 1000).toFixed(1)}s</b><span>Avg time</span></div>
           <div className="stat"><b>{s.flagsFound}</b><span>Clues found</span></div>
         </div>
+        {s.phishedCount > 0 && <p className="bad">🎣 You opened {s.phishedCount} scam link{s.phishedCount > 1 ? 's' : ''}. In real life, inspect first and never open links from unexpected messages.</p>}
         {!passed && s.level === s.unlockedLevel && s.level < 3 && <p className="muted">Reach {s.unlockAccuracy}% accuracy to unlock Level {s.level + 1}.</p>}
       </div>
       <div className="card">
@@ -213,7 +232,7 @@ function Summary({ s, onAgain }) {
             {s.details.map((d) => (
               <tr key={d.scenarioId} className={d.isCorrect ? '' : 'row-miss'}>
                 <td>{d.isCorrect ? '✅' : '❌'} {d.label}</td>
-                <td>{d.choice ? (d.choice === 'phishing' ? 'Phishing' : 'Legit') : '⏰ timeout'}</td>
+                <td>{d.linkClicked && !d.isCorrect ? '🎣 opened link' : d.choice ? (d.choice === 'phishing' ? 'Phishing' : 'Legit') : '⏰ timeout'}</td>
                 <td><span className={`pill ${d.isPhishing ? 'pill-red' : 'pill-green'}`}>{d.isPhishing ? 'Phishing' : 'Legit'}</span></td>
                 <td className="num">{(d.timeMs / 1000).toFixed(1)}s</td>
                 <td className="num">{d.points}</td>

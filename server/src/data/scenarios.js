@@ -7,7 +7,9 @@
 //  - safeSigns: why a legit message can be trusted (shown in feedback)
 // All phishing domains below are fictional and used for training only.
 
-export const scenarios = [
+import { phase2Scenarios } from './scenarios-ph2.js';
+
+const baseScenarios = [
   // ───────────────────────────── DIFFICULTY 1 ─────────────────────────────
   {
     id: 'gcash-sms-suspend', channel: 'sms', difficulty: 1, isPhishing: true,
@@ -47,7 +49,7 @@ export const scenarios = [
     explanation: 'Legitimate: official domain, matching HTTPS link, no pressure and no request for credentials.',
   },
   {
-    id: 'shopee-prize-sms', channel: 'sms', difficulty: 1, isPhishing: true,
+    id: 'shopee-prize-sms', language: 'taglish', channel: 'sms', difficulty: 1, isPhishing: true,
     senderName: '+63 966 210 4478', senderAddress: '+639662104478',
     body: 'CONGRATS! Napili ka bilang Shopee 11.11 lucky winner ng P50,000 cash! Claim mo na bago mag-expire today: {{link:0}} Pay P499 processing fee lang.',
     links: [{ text: 'bit.ly/shopee-winner-ph', href: 'https://bit.ly/shopee-winner-ph' }],
@@ -69,7 +71,7 @@ export const scenarios = [
     explanation: 'Legitimate delivery notice: official sender ID, no link to click, no payment request.',
   },
   {
-    id: 'messenger-friend-vote', channel: 'social', difficulty: 1, isPhishing: true, platform: 'Messenger',
+    id: 'messenger-friend-vote', language: 'taglish', channel: 'social', difficulty: 1, isPhishing: true, platform: 'Messenger',
     senderName: 'Carla Mendoza', senderAddress: 'Messenger',
     body: 'Hi! Pa-vote naman ako sa contest namin sa school, need ko lang 10 votes pa 🙏 Login ka lang with your Facebook dito: {{link:0}} Salamat!!',
     links: [{ text: 'fb-voting-contest.online/vote', href: 'http://fb-voting-contest.online/vote/login' }],
@@ -80,7 +82,7 @@ export const scenarios = [
     explanation: 'Account-takeover scam sent from a compromised friend\'s account. Verify with your friend through another channel.',
   },
   {
-    id: 'job-sms-easy-money', channel: 'sms', difficulty: 1, isPhishing: true,
+    id: 'job-sms-easy-money', language: 'taglish', channel: 'sms', difficulty: 1, isPhishing: true,
     senderName: '+63 995 330 1182', senderAddress: '+639953301182',
     body: 'Hiring! Part-time online job para sa students. Earn P3,000-P8,000/day, like and share lang ng videos. No experience needed! Message HR on Telegram: {{link:0}}',
     links: [{ text: 't.me/HR_Recruit_PH88', href: 'https://t.me/HR_Recruit_PH88' }],
@@ -300,7 +302,7 @@ export const scenarios = [
     explanation: 'Fake file-share email. Check your university Teams/OneDrive directly, or ask the professor in class.',
   },
   {
-    id: 'messenger-gcash-loan', channel: 'social', difficulty: 2, isPhishing: true, platform: 'Messenger',
+    id: 'messenger-gcash-loan', language: 'taglish', channel: 'social', difficulty: 2, isPhishing: true, platform: 'Messenger',
     senderName: 'Tito Ramon', senderAddress: 'Messenger',
     body: 'Iho, emergency lang. Naospital si Tita mo, kulang kami ng P5,000. Pwede mo ba i-send muna sa GCash ko na bago: 0928-771-0045? Ibabalik ko bukas. Wag mo muna sabihin kay Mama mo ha.',
     links: [],
@@ -396,7 +398,7 @@ export const scenarios = [
     explanation: 'Legitimate Google alert. Still, typing myaccount.google.com yourself is the safest way to check.',
   },
   {
-    id: 'lazada-refund-chat', channel: 'social', difficulty: 3, isPhishing: true, platform: 'Messenger',
+    id: 'lazada-refund-chat', language: 'taglish', channel: 'social', difficulty: 3, isPhishing: true, platform: 'Messenger',
     senderName: 'LazMall Refund Desk', senderAddress: 'Messenger',
     body: 'Good afternoon po! This is Lazada Customer Service. We noticed your order #5012384467 was double-charged. To process your P1,299 refund, please provide the OTP that will be sent to your GCash now. This is for verification only po.',
     links: [],
@@ -501,3 +503,10 @@ export const scenarios = [
     explanation: 'Malicious sponsored ad. Displayed link text can be anything, so always check where it really goes.',
   },
 ];
+
+// language defaults to 'en'; addedIn marks the seed version that introduced a scenario
+export const scenarios = [
+  ...baseScenarios.map((s) => ({ language: 'en', addedIn: 1, ...s })),
+  ...phase2Scenarios.map((s) => ({ addedIn: 2, ...s })),
+];
+export const SEED_VERSION = 2;

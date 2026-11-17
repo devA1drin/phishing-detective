@@ -5,6 +5,7 @@ const toScenario = (r) => r && ({
   isPhishing: !!r.is_phishing, senderName: r.sender_name, senderAddress: r.sender_address,
   subject: r.subject || undefined, body: r.body, links: r.links || [], attachments: r.attachments || [],
   redFlags: r.red_flags || [], safeSigns: r.safe_signs || [], explanation: r.explanation, active: !!r.active,
+  language: r.language || 'en',
   createdAt: r.created_at, updatedAt: r.updated_at,
 });
 
@@ -12,12 +13,13 @@ const toSession = (r) => r && ({
   id: r.id, playerId: r.player_id, level: r.level, scenarioIds: r.scenario_ids || [],
   score: r.score, correct: r.correct, answered: r.answered, currentStreak: r.current_streak,
   maxStreak: r.max_streak, startedAt: r.started_at, finishedAt: r.finished_at, nickname: r.nickname,
+  mode: r.mode || 'classic', language: r.language || null,
 });
 
 const scenarioValues = (s) => [
   s.id, s.channel, s.platform || null, Number(s.difficulty), !!s.isPhishing, s.senderName, s.senderAddress,
   s.subject || null, s.body, s.links || [], s.attachments || [], s.redFlags || [], s.safeSigns || [],
-  s.explanation || '', s.active !== false,
+  s.explanation || '', s.active !== false, s.language || 'en',
 ];
 
 export const DEFAULT_SETTINGS = {
@@ -87,13 +89,18 @@ export function createRepo(driver) {
     },
     async getScenario(id) { return toScenario(await one('SELECT * FROM scenarios WHERE id = $1', [id])); },
     async createScenario(s) {
-      await q(`INSERT INTO scenarios (id, channel, platform, difficulty, is_phishing, sender_name, sender_address, subject, body, links, attachments, red_flags, safe_signs, explanation, active)
-        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`, scenarioValues(s));
+      await q(`INSERT INTO scenarios (id, channel, platform, difficulty, is_phishing, sender_name, sender_address, subject, body, links, attachments, red_flags, safe_signs, explanation, active, language)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)`, scenarioValues(s));
       return repo.getScenario(s.id);
+    },
+    /** Insert a seed scenario unless that id exists (safe under concurrent cold starts). */
+    async insertScenarioIfMissing(s) {
+      return (await driver.query(`INSERT INTO scenarios (id, channel, platform, difficulty, is_phishing, sender_name, sender_address, subject, body, links, attachments, red_flags, safe_signs, explanation, active, language)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16) ON CONFLICT (id) DO NOTHING`, scenarioValues(s))).rowCount > 0;
     },
     async updateScenario(id, s) {
       const rows = await q(`UPDATE scenarios SET channel=$2, platform=$3, difficulty=$4, is_phishing=$5, sender_name=$6, sender_address=$7,
-        subject=$8, body=$9, links=$10, attachments=$11, red_flags=$12, safe_signs=$13, explanation=$14, active=$15, updated_at=CURRENT_TIMESTAMP
+        subject=$8, body=$9, links=$10, attachments=$11, red_flags=$12, safe_signs=$13, explanation=$14, active=$15, language=$16, updated_at=CURRENT_TIMESTAMP
         WHERE id=$1 RETURNING id`, scenarioValues({ ...s, id }));
       return rows.length ? repo.getScenario(id) : null;
     },
@@ -101,8 +108,8 @@ export function createRepo(driver) {
     async countScenarios() { return (await one('SELECT COUNT(*) AS c FROM scenarios')).c; },
 
     // ── sessions & answers ──
-    async createSession({ playerId, level, scenarioIds }) {
-      return toSession(await one('INSERT INTO game_sessions (player_id, level, scenario_ids) VALUES ($1, $2, $3) RETURNING *', [playerId, level, scenarioIds]));
+    async createSession({ playerId, level, scenarioIds, mode = 'classic', language = null }) {
+      return toSession(await one('INSERT INTO game_sessions (player_id, level, scenario_ids, mode, language) VALUES ($1, $2, $3, $4, $5) RETURNING *', [playerId, level, scenarioIds, mode, language]));
     },
     async getSession(id) { return validId(id) ? toSession(await one('SELECT * FROM game_sessions WHERE id = $1', [Number(id)])) : undefined; },
     async listSessions() {
@@ -114,8 +121,8 @@ export function createRepo(driver) {
     async getAnswer(sessionId, scenarioId) { return one('SELECT * FROM answers WHERE session_id = $1 AND scenario_id = $2', [sessionId, scenarioId]); },
     async recordAnswer(a, u) {
       await driver.tx(async (t) => {
-        await t.query(`INSERT INTO answers (session_id, scenario_id, choice, is_correct, time_ms, flags_found, false_clicks, points)
-          VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`, [a.sessionId, a.scenarioId, a.choice, !!a.isCorrect, a.timeMs, a.flagsFound, a.falseClicks, a.points]);
+        await t.query(`INSERT INTO answers (session_id, scenario_id, choice, is_correct, time_ms, flags_found, false_clicks, points, link_clicked)
+          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`, [a.sessionId, a.scenarioId, a.choice, !!a.isCorrect, a.timeMs, a.flagsFound, a.falseClicks, a.points, !!a.linkClicked]);
         await t.query('UPDATE game_sessions SET score=$2, correct=$3, answered=$4, current_streak=$5, max_streak=$6 WHERE id=$1',
           [u.id, u.score, u.correct, u.answered, u.currentStreak, u.maxStreak]);
       });
@@ -126,7 +133,7 @@ export function createRepo(driver) {
       return repo.getSession(id);
     },
     async listAnswersExport() {
-      return q(`SELECT a.id, a.session_id, p.nickname, p.group_name, a.scenario_id, sc.difficulty, sc.is_phishing, a.choice, a.is_correct, a.time_ms, a.flags_found, a.false_clicks, a.points, a.created_at
+      return q(`SELECT a.id, a.session_id, p.nickname, p.group_name, a.scenario_id, sc.difficulty, sc.channel, sc.language, sc.is_phishing, s.mode, a.choice, a.is_correct, a.link_clicked, a.time_ms, a.flags_found, a.false_clicks, a.points, a.created_at
         FROM answers a JOIN game_sessions s ON s.id=a.session_id JOIN players p ON p.id=s.player_id LEFT JOIN scenarios sc ON sc.id=a.scenario_id ORDER BY a.id`);
     },
 
@@ -182,13 +189,14 @@ export function createRepo(driver) {
     },
     async scenarioStats() {
       return q(`
-        SELECT sc.id, sc.channel, sc.difficulty, sc.is_phishing, sc.sender_name, sc.subject, sc.active,
+        SELECT sc.id, sc.channel, sc.language, sc.difficulty, sc.is_phishing, sc.sender_name, sc.subject, sc.active,
           COUNT(a.id) AS attempts,
+          COALESCE(SUM(CASE WHEN a.link_clicked = true THEN 1 ELSE 0 END),0) AS link_clicks,
           COALESCE(SUM(CASE WHEN a.is_correct = false THEN 1 ELSE 0 END),0) AS misses,
           ROUND(100.0*SUM(CASE WHEN a.is_correct = false THEN 1 ELSE 0 END)/NULLIF(COUNT(a.id),0),1) AS miss_rate,
           ROUND(AVG(a.time_ms)) AS avg_time_ms
         FROM scenarios sc LEFT JOIN answers a ON a.scenario_id = sc.id
-        GROUP BY sc.id, sc.channel, sc.difficulty, sc.is_phishing, sc.sender_name, sc.subject, sc.active
+        GROUP BY sc.id, sc.channel, sc.language, sc.difficulty, sc.is_phishing, sc.sender_name, sc.subject, sc.active
         ORDER BY miss_rate DESC NULLS LAST, attempts DESC`);
     },
   };

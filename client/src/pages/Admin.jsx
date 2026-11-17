@@ -164,14 +164,14 @@ function MissRates({ rows }) {
       <p className="muted small">Scenarios students get wrong most often. Use these to focus your classroom discussion.</p>
       <div className="table-wrap">
         <table className="table">
-          <thead><tr><th>Scenario</th><th>Type</th><th>Diff.</th><th>Truth</th><th className="num">Attempts</th><th className="num">Misses</th><th>Miss rate</th><th className="num">Avg time</th></tr></thead>
+          <thead><tr><th>Scenario</th><th>Type</th><th>Diff.</th><th>Truth</th><th className="num">Attempts</th><th className="num">Misses</th><th className="num" title="Players who opened a link in this case (link trap)">🎣 Opened</th><th>Miss rate</th><th className="num">Avg time</th></tr></thead>
           <tbody>
             {rows.map((r) => (
               <tr key={r.id}>
                 <td><b>{r.subject || r.sender_name}</b><div className="muted small">{r.id}{!r.active && ' · inactive'}</div></td>
                 <td>{r.channel}</td><td>{'★'.repeat(r.difficulty)}</td>
                 <td><span className={`pill ${r.is_phishing ? 'pill-red' : 'pill-green'}`}>{r.is_phishing ? 'Phishing' : 'Legit'}</span></td>
-                <td className="num">{r.attempts}</td><td className="num">{r.misses}</td>
+                <td className="num">{r.attempts}</td><td className="num">{r.misses}</td><td className="num">{r.link_clicks ?? 0}</td>
                 <td className="miss-cell">{r.miss_rate == null ? <span className="muted">-</span> : <><div className="bar small-bar"><div className="bar-fill miss" style={{ width: `${r.miss_rate}%` }} /></div><b>{r.miss_rate}%</b></>}</td>
                 <td className="num">{r.avg_time_ms ? `${(r.avg_time_ms / 1000).toFixed(1)}s` : '-'}</td>
               </tr>
@@ -381,7 +381,7 @@ function Sessions({ rows }) {
 
 const EMPTY = {
   id: '', channel: 'email', platform: '', difficulty: 1, isPhishing: true, senderName: '', senderAddress: '', subject: '',
-  body: '', links: [], attachments: [], redFlags: [], safeSigns: [], explanation: '', active: true,
+  body: '', links: [], attachments: [], redFlags: [], safeSigns: [], explanation: '', active: true, language: 'en',
 };
 
 function ScenarioManager({ token, scenarios, reload }) {
@@ -413,7 +413,7 @@ function ScenarioManager({ token, scenarios, reload }) {
           <tbody>
             {shown.map((s) => (
               <tr key={s.id}>
-                <td className="small"><code>{s.id}</code></td><td>{s.channel}</td><td>{'★'.repeat(s.difficulty)}</td>
+                <td className="small"><code>{s.id}</code></td><td>{s.channel}{s.language && s.language !== 'en' && <span className="muted small"> · {s.language}</span>}</td><td>{'★'.repeat(s.difficulty)}</td>
                 <td><span className={`pill ${s.isPhishing ? 'pill-red' : 'pill-green'}`}>{s.isPhishing ? 'Phishing' : 'Legit'}</span></td>
                 <td><b>{s.senderName}</b><div className="small muted">{s.subject || s.body.slice(0, 60) + '…'}</div></td>
                 <td className="num">{s.redFlags.length}</td>
@@ -450,7 +450,10 @@ function ScenarioForm({ token, initial, isNew, onDone, onCancel }) {
     f.body.split(/(\{\{link:\d+\}\})/).forEach((chunk, i) => {
       const m = chunk.match(/^\{\{link:(\d+)\}\}$/);
       if (m) segs.push({ type: 'link', index: Number(m[1]) });
-      else if (chunk) segs.push({ type: 'text', text: chunk, id: `p${i}` });
+      else if (chunk) chunk.split(/(\n+)/).forEach((part, j) => {
+        if (!part) return;
+        segs.push(/^\n+$/.test(part) ? { type: 'break', text: part } : { type: 'text', text: part, id: `p${i}-${j}` });
+      });
     });
     return { ...f, segments: segs, links: parsed.out.links || [], attachments: parsed.out.attachments || [] };
   }, [f, parsed]);
@@ -472,7 +475,8 @@ function ScenarioForm({ token, initial, isNew, onDone, onCancel }) {
         <h3>{isNew ? 'New scenario' : `Edit: ${f.id}`}</h3>
         <div className="form-grid">
           <label>ID<input value={f.id} onChange={set('id')} disabled={!isNew} placeholder="e.g. gcash-sms-promo" required /></label>
-          <label>Channel<select value={f.channel} onChange={set('channel')}><option value="email">Email</option><option value="sms">SMS</option><option value="social">Social DM</option></select></label>
+          <label>Channel<select value={f.channel} onChange={set('channel')}><option value="email">Email</option><option value="sms">SMS</option><option value="social">Social DM</option><option value="call">Phone call (vishing transcript)</option></select></label>
+          <label>Language<select value={f.language || 'en'} onChange={set('language')}><option value="en">English</option><option value="taglish">Taglish</option><option value="tl">Filipino</option></select></label>
           <label>Difficulty<select value={f.difficulty} onChange={set('difficulty')}><option value={1}>1 - Easy</option><option value={2}>2 - Medium</option><option value={3}>3 - Hard</option></select></label>
           <label>Verdict<select value={String(f.isPhishing)} onChange={(e) => setF({ ...f, isPhishing: e.target.value === 'true' })}><option value="true">Phishing</option><option value="false">Legit</option></select></label>
           <label>Sender name<input value={f.senderName} onChange={set('senderName')} required /></label>
@@ -480,9 +484,9 @@ function ScenarioForm({ token, initial, isNew, onDone, onCancel }) {
           {f.channel === 'email' && <label className="span2">Subject<input value={f.subject} onChange={set('subject')} /></label>}
           {f.channel === 'social' && <label>Platform<input value={f.platform} onChange={set('platform')} placeholder="Messenger, Instagram, Telegram…" /></label>}
           <label className="checkbox"><input type="checkbox" checked={f.active} onChange={set('active')} /> Active (served to players)</label>
-          <label className="span2">Body <small className="muted">Use {'{{link:0}}'} to place links[0]</small><textarea rows={7} value={f.body} onChange={set('body')} required /></label>
+          <label className="span2">Body <small className="muted">Use {'{{link:0}}'} to place links[0]. Calls: one line per speaker starting with "Caller:" or "You:"</small><textarea rows={7} value={f.body} onChange={set('body')} required /></label>
           <label className="span2">Explanation<textarea rows={2} value={f.explanation} onChange={set('explanation')} /></label>
-          <label>Links (JSON) <small className="muted">[{'{"text","href"}'}]</small><textarea className="mono" rows={4} value={json.links} onChange={(e) => setJson({ ...json, links: e.target.value })} /></label>
+          <label>Links (JSON) <small className="muted">[{'{"text","href","qr":true?}'}] (qr renders a QR code)</small><textarea className="mono" rows={4} value={json.links} onChange={(e) => setJson({ ...json, links: e.target.value })} /></label>
           <label>Attachments (JSON) <small className="muted">[{'{"name","size"}'}]</small><textarea className="mono" rows={4} value={json.attachments} onChange={(e) => setJson({ ...json, attachments: e.target.value })} /></label>
           <label className="span2">Red flags (JSON) <small className="muted">[{'{"target":"sender|subject|body|link|attachment","match":"exact body text","index":0,"label","detail"}'}]</small><textarea className="mono" rows={7} value={json.redFlags} onChange={(e) => setJson({ ...json, redFlags: e.target.value })} /></label>
           <label className="span2">Safe signs (JSON array of strings, for legit messages)<textarea className="mono" rows={3} value={json.safeSigns} onChange={(e) => setJson({ ...json, safeSigns: e.target.value })} /></label>

@@ -5,7 +5,7 @@
 // SQLite applies the mirrored migrations in migrate-sqlite.js on startup.
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { scenarios as seedScenarios } from '../data/scenarios.js';
+import { scenarios as seedScenarios, SEED_VERSION } from '../data/scenarios.js';
 import { createRepo } from './repo.js';
 import { ensureSuperadmin } from '../lib/admins.js';
 
@@ -37,12 +37,25 @@ async function init() {
     throw new Error(`Unsupported DB_DRIVER "${kind}" (use sqlite or postgres)`);
   }
   const repo = createRepo(driver);
-  if ((await repo.countScenarios()) === 0) {
-    for (const s of seedScenarios) await repo.createScenario(s);
-    console.log(`[db] Seeded ${seedScenarios.length} scenarios (${kind})`);
-  }
+  await syncSeedScenarios(repo, kind);
   await ensureSuperadmin(repo);
   return repo;
+}
+
+/**
+ * Seed the scenario bank. A fresh database gets every scenario. An existing database gets
+ * only scenarios added in newer seed versions (never re-inserting ones an admin deleted
+ * from an older version, never overwriting edits).
+ */
+async function syncSeedScenarios(repo, kind) {
+  const settings = await repo.getSettings();
+  const fresh = (await repo.countScenarios()) === 0;
+  const have = fresh ? 0 : Number(settings.seedVersion || 1);
+  if (have >= SEED_VERSION) return;
+  let added = 0;
+  for (const s of seedScenarios) if ((fresh || s.addedIn > have) && (await repo.insertScenarioIfMissing(s))) added++;
+  await repo.setSetting('seedVersion', SEED_VERSION);
+  if (added) console.log(`[db] Seeded ${added} scenarios (${kind}, seed v${SEED_VERSION})`);
 }
 
 export function getRepo() {

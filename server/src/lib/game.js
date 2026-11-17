@@ -6,6 +6,25 @@ export const UNLOCK_ACCURACY = 70; // % accuracy needed in a finished round to u
 export const MAX_LEVEL = 3;
 export const FLAG_BONUS = 20;
 export const FALSE_CLICK_PENALTY = 10;
+export const INBOX_SIZES = { 1: 6, 2: 8, 3: 10 }; // inbox mode: messages to sort per level
+export const MODES = ['classic', 'inbox'];
+export const LANGUAGE_FILTERS = ['all', 'en', 'fil']; // fil = Filipino + Taglish
+const CALL_EXTRA_SECONDS = 10; // call transcripts take longer to read
+
+export const timeLimitFor = (s) => (TIME_LIMITS[s.difficulty] || 30) + (s.channel === 'call' ? CALL_EXTRA_SECONDS : 0);
+export const matchesLanguage = (s, filter) => !filter || filter === 'all' || (filter === 'en' ? (s.language || 'en') === 'en' : ['tl', 'taglish'].includes(s.language));
+
+/** Prefer scenarios in the chosen language; top up from the rest if the filtered pool is too small. */
+export function pickWithLanguage(all, level, size, filter) {
+  const preferred = all.filter((s) => matchesLanguage(s, filter));
+  if (preferred.length >= size) {
+    const picked = pickScenarios(preferred, level, size);
+    if (picked.length === size) return picked;
+  }
+  const first = shuffle(preferred).slice(0, size);
+  const rest = pickScenarios(all.filter((s) => !first.includes(s)), level, size - first.length);
+  return shuffle([...first, ...rest]);
+}
 
 export const shuffle = (arr) => {
   const a = [...arr];
@@ -106,13 +125,13 @@ export function publicScenario(s) {
     id: s.id, channel: s.channel, platform: s.platform, difficulty: s.difficulty,
     senderName: s.senderName, senderAddress: s.senderAddress, subject: s.subject,
     segments: segmentBody(s), links: s.links || [], attachments: s.attachments || [],
-    timeLimit: TIME_LIMITS[s.difficulty] || 30,
+    language: s.language || 'en', timeLimit: timeLimitFor(s),
   };
 }
 
 /** Score one answer. Returns everything needed for instant feedback. */
 export function scoreAnswer(scenario, { choice, timeMs, clickedParts = [] }, currentStreak) {
-  const limitMs = (TIME_LIMITS[scenario.difficulty] || 30) * 1000;
+  const limitMs = timeLimitFor(scenario) * 1000;
   const t = Math.max(0, Math.min(Number(timeMs) || limitMs, limitMs));
   const timedOut = choice !== 'phishing' && choice !== 'legit';
   const isCorrect = !timedOut && (choice === 'phishing') === scenario.isPhishing;
@@ -153,4 +172,32 @@ export function rankFor(totalScore) {
   if (totalScore >= 3000) return 'Senior Inspector';
   if (totalScore >= 1000) return 'Detective';
   return 'Rookie';
+}
+
+/**
+ * Link trap: what "opening" a link in a case would have done. Nothing is ever fetched or
+ * opened; this only explains the (simulated) consequence.
+ */
+export function linkTrap(scenario, index) {
+  const link = (scenario.links || [])[index];
+  if (!link) return null;
+  let host = link.href;
+  try { host = new URL(link.href).host; } catch { /* keep raw */ }
+  const flag = (scenario.redFlags || []).find((f) => f.target === 'link' && f.index === index);
+  if (!scenario.isPhishing) {
+    return { phished: false, host, href: link.href, title: 'Safe destination (simulated)', message: `This ${link.qr ? 'QR code' : 'link'} goes to ${host}, the organization's real site. In real life it is still safest to type the address yourself or use the official app.` };
+  }
+  const wants = /otp|mpin|pin|password|card|cvv/i.test(`${scenario.body} ${flag?.detail || ''}`) ? 'your login, PIN, OTP or card details' : 'your personal details or a payment';
+  return {
+    phished: true, host, href: link.href, qr: !!link.qr,
+    title: link.qr ? 'You scanned a malicious QR code!' : 'You got phished!',
+    message: `${link.qr ? 'The QR code' : 'That link'} led to ${host}, a fake page made to look real. It would ask for ${wants}, and anything typed there goes straight to the scammers.`,
+    why: flag ? `${flag.label}: ${flag.detail}` : 'The destination does not belong to the organization the message claims to be from.',
+    whatToDo: [
+      'Do not type anything on the page. Close it.',
+      'If you already entered a password or PIN, change it right away from the official app or website.',
+      'If you shared an OTP or card details, call your bank or e-wallet hotline (from the back of your card or the official app) to lock the account.',
+      'Report it: CICC hotline 1326, the PNP Anti-Cybercrime Group, or your school IT office.',
+    ],
+  };
 }

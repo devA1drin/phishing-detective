@@ -6,6 +6,7 @@ import Quiz from './pages/Quiz.jsx';
 import Game from './pages/Game.jsx';
 import Admin from './pages/Admin.jsx';
 import Reading from './pages/Reading.jsx';
+import Inbox from './pages/Inbox.jsx';
 import Surveys from './pages/Surveys.jsx';
 import { usePlayer } from './lib/player.jsx';
 
@@ -24,6 +25,7 @@ export default function App() {
           <Route path="/hub" element={<RequirePlayer><Hub /></RequirePlayer>} />
           <Route path="/quiz/:kind" element={<RequirePlayer><Quiz /></RequirePlayer>} />
           <Route path="/play/:level" element={<RequirePlayer><Game /></RequirePlayer>} />
+          <Route path="/inbox/:level" element={<RequirePlayer><Inbox /></RequirePlayer>} />
           <Route path="/reading" element={<RequirePlayer><Reading /></RequirePlayer>} />
           <Route path="/surveys" element={<RequirePlayer><Surveys /></RequirePlayer>} />
           <Route path="/admin" element={<Admin />} />

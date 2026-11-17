@@ -18,6 +18,8 @@ export function validateScenario(s, { partial = false } = {}) {
   if (typeof s.isPhishing !== 'boolean') errors.push('isPhishing must be true/false');
   if (!s.senderName || !s.senderAddress) errors.push('senderName and senderAddress are required');
   if (!s.body) errors.push('body is required');
+  if (s.language !== undefined && !['en', 'tl', 'taglish'].includes(s.language)) errors.push('language must be en, tl or taglish');
+  if (s.channel === 'call' && s.body && !/^(Caller|You):/m.test(s.body)) errors.push('call transcripts need lines starting with "Caller:" or "You:"');
   for (const k of ['links', 'attachments', 'redFlags', 'safeSigns']) if (s[k] !== undefined && !Array.isArray(s[k])) errors.push(`${k} must be an array`);
   if (!errors.length) {
     const keys = flagPartKeys(s, segmentBody(s));

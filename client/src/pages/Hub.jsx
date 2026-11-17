@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link, Navigate } from 'react-router-dom';
 import { api } from '../lib/api.js';
 import { usePlayer } from '../lib/player.jsx';
+import { getPrefs, setPrefs } from '../lib/prefs.js';
 
 const LEVELS = [
   { n: 1, name: 'Rookie Cases', desc: 'Obvious scams: random numbers, fake prizes, loud urgency.' },
@@ -12,6 +13,8 @@ const LEVELS = [
 export default function Hub() {
   const { progress, refresh } = usePlayer();
   const [board, setBoard] = useState([]);
+  const [prefs, setP] = useState(getPrefs);
+  const pref = (patch) => setP(setPrefs(patch));
   useEffect(() => { refresh(); api.leaderboard().then(setBoard).catch(() => {}); }, []); // eslint-disable-line
 
   if (!progress) return <div className="loading">Loading case board…</div>;
@@ -88,6 +91,22 @@ export default function Hub() {
         </div>
       </section>
 
+      <div className="mode-bar card">
+        <div>
+          <span className="small muted">Game mode</span>
+          <div className="tabs">
+            <button className={`tab ${prefs.mode === 'classic' ? 'active' : ''}`} onClick={() => pref({ mode: 'classic' })}>🕵️ Classic: one case at a time</button>
+            <button className={`tab ${prefs.mode === 'inbox' ? 'active' : ''}`} onClick={() => pref({ mode: 'inbox' })}>📥 Inbox: sort 6-10 messages</button>
+          </div>
+        </div>
+        <label className="small muted">Message language
+          <select value={prefs.language} onChange={(e) => pref({ language: e.target.value })}>
+            <option value="all">All languages</option>
+            <option value="en">English</option>
+            <option value="fil">Filipino / Taglish</option>
+          </select>
+        </label>
+      </div>
       <h2 className="section-title">Choose your case level</h2>
       <section className="levels">
         {LEVELS.map((l) => {
@@ -105,7 +124,7 @@ export default function Hub() {
               {locked ? (
                 <div className="lock-note">🔒 Reach {p.unlockAccuracy}% accuracy in Level {l.n - 1} to unlock</div>
               ) : (
-                <Link to={`/play/${l.n}`} className="btn btn-gold block">Start Level {l.n} →</Link>
+                <Link to={`/${prefs.mode === 'inbox' ? 'inbox' : 'play'}/${l.n}`} className="btn btn-gold block">{prefs.mode === 'inbox' ? `Open Level ${l.n} inbox →` : `Start Level ${l.n} →`}</Link>
               )}
             </div>
           );

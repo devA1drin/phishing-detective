@@ -64,6 +64,30 @@ export const sqliteMigrations = [
           last_login_at TEXT);`);
     },
   },
+  {
+    id: '0003_phase2_realism',
+    up(db) {
+      if (!tableSql(db, 'scenarios').includes("'call'")) {
+        rebuild(db, 'scenarios', `CREATE TABLE scenarios (
+          id TEXT PRIMARY KEY,
+          channel TEXT NOT NULL CHECK (channel IN ('email','sms','social','call')),
+          platform TEXT,
+          difficulty INTEGER NOT NULL CHECK (difficulty BETWEEN 1 AND 3),
+          is_phishing INTEGER NOT NULL,
+          sender_name TEXT NOT NULL, sender_address TEXT NOT NULL, subject TEXT, body TEXT NOT NULL,
+          links TEXT NOT NULL DEFAULT '[]', attachments TEXT NOT NULL DEFAULT '[]',
+          red_flags TEXT NOT NULL DEFAULT '[]', safe_signs TEXT NOT NULL DEFAULT '[]',
+          explanation TEXT NOT NULL DEFAULT '', active INTEGER NOT NULL DEFAULT 1,
+          created_at TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP), updated_at TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP))`);
+      }
+      addColumn(db, 'scenarios', 'language', "TEXT NOT NULL DEFAULT 'en'");
+      db.exec(`UPDATE scenarios SET language = 'taglish' WHERE id IN ('shopee-prize-sms','messenger-friend-vote','job-sms-easy-money','messenger-gcash-loan','lazada-refund-chat') AND language = 'en'`);
+      addColumn(db, 'game_sessions', 'mode', "TEXT NOT NULL DEFAULT 'classic'");
+      addColumn(db, 'game_sessions', 'language', 'TEXT');
+      addColumn(db, 'answers', 'link_clicked', 'INTEGER NOT NULL DEFAULT 0');
+      db.exec('CREATE INDEX IF NOT EXISTS idx_scenarios_language ON scenarios(language)');
+    },
+  },
 ];
 
 export function migrateSqlite(db) {
