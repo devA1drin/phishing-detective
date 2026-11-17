@@ -4,6 +4,7 @@ import Home from './pages/Home.jsx';
 import Hub from './pages/Hub.jsx';
 import Quiz from './pages/Quiz.jsx';
 import Game from './pages/Game.jsx';
+import Verify from './pages/Verify.jsx';
 import Admin from './pages/Admin.jsx';
 import Reading from './pages/Reading.jsx';
 import Inbox from './pages/Inbox.jsx';
@@ -28,6 +29,9 @@ export default function App() {
           <Route path="/inbox/:level" element={<RequirePlayer><Inbox /></RequirePlayer>} />
           <Route path="/reading" element={<RequirePlayer><Reading /></RequirePlayer>} />
           <Route path="/surveys" element={<RequirePlayer><Surveys /></RequirePlayer>} />
+          <Route path="/daily" element={<RequirePlayer><Game daily /></RequirePlayer>} />
+          <Route path="/verify" element={<Verify />} />
+          <Route path="/verify/:code" element={<Verify />} />
           <Route path="/admin" element={<Admin />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

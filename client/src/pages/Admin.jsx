@@ -53,7 +53,7 @@ function Dashboard({ token, onLogout }) {
   };
   useEffect(() => { load(); }, []); // eslint-disable-line
 
-  const tabs = [['overview', '📊 Overview'], ['scenarios-stats', '🎯 Miss rates'], ['players', '🕵️ Players'], ['sessions', '🎮 Sessions'], ['manage', '🗂 Scenario bank'], ['ai', `🤖 AI drafts${data.stats?.pendingScenarios ? ` (${data.stats.pendingScenarios})` : ''}`], ['study', '⚙️ Study & accounts']];
+  const tabs = [['overview', '📊 Overview'], ['scenarios-stats', '🎯 Miss rates'], ['players', '🕵️ Players'], ['sessions', '🎮 Sessions'], ['manage', '🗂 Scenario bank'], ['classes', '🏫 Classes'], ['ai', `🤖 AI drafts${data.stats?.pendingScenarios ? ` (${data.stats.pendingScenarios})` : ''}`], ['study', '⚙️ Study & accounts']];
   return (
     <div className="admin">
       <div className="admin-head">
@@ -77,6 +77,7 @@ function Dashboard({ token, onLogout }) {
           {tab === 'manage' && <ScenarioManager token={token} scenarios={data.scenarios} reload={load} />}
           {tab === 'study' && <StudyAdmin token={token} me={data.me} />}
           {tab === 'ai' && <AiStudio token={token} reload={load} />}
+          {tab === 'classes' && <Classes token={token} me={data.me} />}
         </>
       )}
     </div>
@@ -375,6 +376,39 @@ function Sessions({ rows }) {
             ))}
           </tbody>
         </table>
+      </div>
+    </div>
+  );
+}
+
+function Classes({ token, me }) {
+  const [rows, setRows] = useState(null);
+  const [name, setName] = useState('');
+  const [err, setErr] = useState('');
+  const load = () => api.admin.sections(token).then(setRows).catch((e) => setErr(e.message));
+  useEffect(() => { load(); }, []); // eslint-disable-line
+  const create = async (e) => {
+    e.preventDefault(); setErr('');
+    try { await api.admin.createSection(token, name); setName(''); load(); } catch (x) { setErr(x.message); }
+  };
+  return (
+    <div className="overview">
+      <div className="card">
+        <h3>🏫 Class sections</h3>
+        <p className="muted small">Create a section and share its join code. Students enter it on their case board to join the class leaderboard{me?.role === 'superadmin' ? '' : ' and your reports'}.</p>
+        <form className="join-form" onSubmit={create}>
+          <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Section name, e.g. BSIT 3A" maxLength={60} style={{ textTransform: 'none', letterSpacing: 0 }} />
+          <button className="btn btn-gold" disabled={name.trim().length < 2}>+ Create section</button>
+        </form>
+        {err && <p className="error small">{err}</p>}
+        {!rows ? <p className="muted">Loading…</p> : rows.length === 0 ? <p className="muted">No sections yet.</p> : (
+          <div className="table-wrap">
+            <table className="table">
+              <thead><tr><th>Section</th><th>Join code</th><th className="num">Students</th><th>Educator</th><th>Created</th></tr></thead>
+              <tbody>{rows.map((r) => <tr key={r.id}><td><b>{r.name}</b></td><td><code className="cert-code">{r.join_code}</code></td><td className="num">{r.players}</td><td>{r.owner_username || '-'}</td><td className="small">{new Date(r.created_at).toLocaleDateString()}</td></tr>)}</tbody>
+            </table>
+          </div>
+        )}
       </div>
     </div>
   );

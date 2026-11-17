@@ -10,6 +10,7 @@ import gameRouter from './routes/game.js';
 import quizRouter from './routes/quiz.js';
 import adminRouter from './routes/admin.js';
 import surveysRouter from './routes/surveys.js';
+import certificatesRouter from './routes/certificates.js';
 import { generalLimiter } from './lib/ratelimit.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -29,6 +30,7 @@ export async function createApp() {
   app.use('/api', gameRouter(repo));
   app.use('/api', quizRouter(repo));
   app.use('/api', adminRouter(repo));
+  app.use('/api', certificatesRouter(repo));
   app.use('/api', (_req, res) => res.status(404).json({ error: 'Not found' }));
 
   // Serve the built React client (npm run build) from Express

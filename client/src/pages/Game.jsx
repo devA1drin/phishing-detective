@@ -6,10 +6,11 @@ import MessageView from '../components/MessageView.jsx';
 import Timer from '../components/Timer.jsx';
 import { TrapOverlay, SafeLinkNote } from '../components/TrapOverlay.jsx';
 import { getPrefs } from '../lib/prefs.js';
+import { NewBadges } from '../components/Gamification.jsx';
 
 export const channelLabel = { email: '📧 Email', sms: '💬 SMS', social: '📱 Social DM', call: '📞 Call' };
 
-export default function Game() {
+export default function Game({ daily = false }) {
   const { level } = useParams();
   const { player, refresh } = usePlayer();
   const nav = useNavigate();
@@ -31,8 +32,9 @@ export default function Game() {
   useEffect(() => {
     if (started.current) return;
     started.current = true;
-    api.startSession(Number(level), { mode: 'classic', language: getPrefs().language }).then(setSession).catch((e) => setError(e.message));
-  }, [player.id, level]);
+    const start = daily ? api.startSession(1, { mode: 'daily' }) : api.startSession(Number(level), { mode: 'classic', language: getPrefs().language });
+    start.then(setSession).catch((e) => setError(e.message));
+  }, [player.id, level, daily]);
 
   const scenario = session?.scenarios[idx];
 
@@ -116,7 +118,7 @@ export default function Game() {
     <div className="game">
       {trap?.phished && <TrapOverlay trap={trap} onClose={() => setTrap(null)} />}
       <div className="game-hud card">
-        <div className="hud-item"><span>Level</span><b>{session.level}</b></div>
+        <div className="hud-item"><span>{session.mode === 'daily' ? 'Mode' : 'Level'}</span><b>{session.mode === 'daily' ? '📅 Daily' : session.level}</b></div>
         <div className="hud-item"><span>Case</span><b>{idx + 1}/{session.scenarios.length}</b></div>
         <div className="hud-item"><span>Score</span><b className="gold">{score}</b></div>
         <div className="hud-item"><span>Streak</span><b>{streak > 0 ? `🔥 ${streak}` : '-'}</b></div>
@@ -230,9 +232,10 @@ export function Summary({ s, onAgain }) {
   return (
     <div className="summary">
       <div className="card summary-head">
-        <span className="eyebrow">Level {s.level} · {s.mode === 'inbox' ? 'Inbox' : 'Round'} report</span>
+        <span className="eyebrow">{s.mode === 'daily' ? `Daily challenge · ${s.challengeDate}` : `Level ${s.level} · ${s.mode === 'inbox' ? 'Inbox' : 'Round'} report`}</span>
         <h1>{s.accuracy >= 90 ? 'Outstanding work, Detective! 🏅' : passed ? 'Case closed! 🕵️' : 'Keep training, Detective 🔍'}</h1>
         {s.newlyUnlocked && <div className="unlock-banner">🔓 Level {s.newlyUnlocked} unlocked!</div>}
+        <NewBadges list={s.newBadges} />
         <div className="stat-row">
           <div className="stat"><b className="gold">{s.score}</b><span>Points</span></div>
           <div className="stat"><b>{s.correct}/{s.total}</b><span>Correct</span></div>
@@ -242,7 +245,7 @@ export function Summary({ s, onAgain }) {
           <div className="stat"><b>{s.flagsFound}</b><span>Clues found</span></div>
         </div>
         {s.phishedCount > 0 && <p className="bad">🎣 You opened {s.phishedCount} scam link{s.phishedCount > 1 ? 's' : ''}. In real life, inspect first and never open links from unexpected messages.</p>}
-        {!passed && s.level === s.unlockedLevel && s.level < 3 && <p className="muted">Reach {s.unlockAccuracy}% accuracy to unlock Level {s.level + 1}.</p>}
+        {s.mode !== 'daily' && !passed && s.level === s.unlockedLevel && s.level < 3 && <p className="muted">Reach {s.unlockAccuracy}% accuracy to unlock Level {s.level + 1}.</p>}
       </div>
       <div className="card">
         <h3>Case log</h3>
@@ -262,7 +265,7 @@ export function Summary({ s, onAgain }) {
         </table>
       </div>
       <div className="choice-row">
-        <button className="btn btn-gold" onClick={onAgain}>Play again</button>
+        {s.mode !== 'daily' && <button className="btn btn-gold" onClick={onAgain}>Play again</button>}
         <Link className="btn btn-ghost" to="/hub">Back to case board</Link>
       </div>
     </div>

@@ -173,7 +173,7 @@ export function scoreAnswer(scenario, { choice, timeMs, clickedParts = [] }, cur
 export function unlockedLevels(sessions) {
   let unlocked = 1;
   for (let lvl = 1; lvl < MAX_LEVEL; lvl++) {
-    const passed = sessions.some((s) => s.finishedAt && s.level === lvl && s.answered > 0 && (100 * s.correct) / s.answered >= UNLOCK_ACCURACY);
+    const passed = sessions.some((s) => s.finishedAt && s.mode !== 'daily' && s.level === lvl && s.answered > 0 && (100 * s.correct) / s.answered >= UNLOCK_ACCURACY);
     if (passed && unlocked === lvl) unlocked = lvl + 1;
   }
   return unlocked;

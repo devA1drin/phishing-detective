@@ -4,6 +4,7 @@ import { hashPin, checkHash } from '../lib/admins.js';
 import { issuePlayerToken, requirePlayer } from '../lib/auth.js';
 import { authLimiter } from '../lib/ratelimit.js';
 import { buildProgress } from '../lib/progress.js';
+import { evaluateBadges } from '../lib/badges.js';
 
 const NICK_RE = /^[A-Za-z0-9_.-]{3,24}$/;
 const PIN_RE = /^\d{4,6}$/;
@@ -57,6 +58,31 @@ export default function playersRouter(repo) {
   r.post('/players/me/reading-done', requirePlayer, async (req, res) => {
     await repo.markReadingDone(req.playerId);
     res.json({ ok: true });
+  });
+
+  r.get('/players/me/badges', requirePlayer, async (req, res) => {
+    const { badges, newly } = await evaluateBadges(repo, req.playerId);
+    res.json({ badges, newly, earned: badges.filter((b) => b.earned).length });
+  });
+
+  // Join a class section with the code from your teacher (switching later is allowed)
+  r.post('/players/me/section', requirePlayer, authLimiter, async (req, res) => {
+    const code = String(req.body?.code || '').trim();
+    if (!code) { await repo.setPlayerSection(req.playerId, null); return res.json({ section: null }); }
+    const sec = await repo.getSectionByCode(code);
+    if (!sec) return res.status(404).json({ error: 'No class has that join code. Check with your teacher.' });
+    await repo.setPlayerSection(req.playerId, sec.id);
+    res.json({ section: { id: sec.id, name: sec.name } });
+  });
+
+  // Class vs class: average points per active player (fair to class size), then accuracy
+  r.get('/leaderboard/classes', async (_req, res) => {
+    const rows = (await repo.classLeaderboard()).map((c) => ({
+      id: c.id, name: c.name, members: c.members, activePlayers: c.active_players, totalScore: c.total_score,
+      avgScore: c.active_players ? Math.round(c.total_score / c.active_players) : 0,
+      accuracy: c.answered ? Math.round((1000 * c.correct) / c.answered) / 10 : null,
+    })).sort((a, b) => b.avgScore - a.avgScore || (b.accuracy ?? 0) - (a.accuracy ?? 0));
+    res.json(rows.map((c, i) => ({ ...c, place: i + 1 })));
   });
 
   r.get('/leaderboard', async (_req, res) => {

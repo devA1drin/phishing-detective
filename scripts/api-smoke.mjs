@@ -19,6 +19,7 @@ const ok = (label, extra = '') => console.log(`✔ ${label}${extra ? `: ${extra}
 const answers = (kind, items) => items.map((i, n) => ({ itemId: i.id, choice: (n % 4 === 0) !== quizPools[kind].find((q) => q.id === i.id).isPhishing ? 'phishing' : 'legit', confidence: 1 + (n % 5) }));
 
 const aiDrafts = [];
+let smokeSection = null;
 let admin, playerId;
 try {
   const h = await call('GET', '/health'); ok('health', JSON.stringify(h));
@@ -66,6 +67,25 @@ try {
     ok(`CSV ${k}`, `${csv.split('\n').length - 1} rows`);
   }
   await call('GET', '/admin/admins', null, admin); ok('admin accounts list');
+  // Phase 4: class sections, badges, daily challenge, certificate + verification
+  const sec = await call('POST', '/admin/sections', { name: `smoke-${Date.now().toString(36)}` }, admin, 201); smokeSection = sec.id;
+  await call('POST', '/players/me/section', { code: sec.join_code }, token); ok('join class', `${sec.name} (${sec.join_code})`);
+  const daily = await call('POST', '/sessions', { mode: 'daily' }, token, 201);
+  for (const sc of daily.scenarios) {
+    const t = scenarios.find((x) => x.id === sc.id);
+    await call('POST', `/sessions/${daily.sessionId}/answers`, { scenarioId: sc.id, choice: t ? (t.isPhishing ? 'phishing' : 'legit') : 'phishing', timeMs: 5000 }, token);
+  }
+  const dfin = await call('POST', `/sessions/${daily.sessionId}/finish`, null, token);
+  await call('POST', '/sessions', { mode: 'daily' }, token, 409);
+  ok('daily challenge', `${daily.date}: ${dfin.score} pts, one attempt enforced`);
+  const badges = await call('GET', '/players/me/badges', null, token); ok('badges', `${badges.earned}/${badges.badges.length}: ${badges.badges.filter((b) => b.earned).map((b) => b.id).join(', ')}`);
+  const classes = await call('GET', '/leaderboard/classes'); ok('class leaderboard', `${classes.length} classes, ours #${classes.find((c) => c.id === sec.id)?.place}`);
+  const cert = (await call('POST', '/certificates/me', null, token, 201)).certificate;
+  const v = await call('GET', `/verify/${cert.code}`); ok('certificate + verify', `${cert.code} valid=${v.valid}`);
+  const pdf = await fetch(`${BASE}/certificates/${cert.code}/pdf`);
+  const pdfBuf = Buffer.from(await pdf.arrayBuffer());
+  if (pdf.status !== 200 || pdfBuf.subarray(0, 5).toString() !== '%PDF-') throw new Error(`certificate PDF failed: HTTP ${pdf.status}`);
+  ok('certificate PDF', `${Math.round(pdfBuf.length / 1024)} KB`);
   const ai = await call('GET', '/admin/ai/status', null, admin);
   ok('AI status', ai.enabled ? `enabled, ${ai.model} via ${ai.auth}` : `disabled: ${ai.reason}`);
   if (ai.enabled && process.env.SMOKE_AI_GENERATE === '1') {
@@ -78,6 +98,7 @@ try {
     } else console.log(`✖ AI generate: HTTP ${res.status} ${g.error}`);
   }
 } finally {
+  if (admin && smokeSection) { await call('DELETE', `/admin/sections/${smokeSection}`, null, admin, 204); ok('cleanup', `deleted smoke section #${smokeSection}`); }
   for (const id of aiDrafts) { await call('DELETE', `/admin/scenarios/${id}`, null, admin, 204).catch((e) => console.log('draft cleanup failed', e.message)); ok('cleanup', `deleted smoke AI draft ${id}`); }
   if (admin && playerId) { await call('DELETE', `/admin/players/${playerId}`, null, admin, 204); ok('cleanup', `deleted smoke player #${playerId}`); }
 }

@@ -28,7 +28,9 @@ export async function buildProgress(repo, player) {
   // Control group = wait-list control: gameplay opens only after their retention quiz.
   const canPlay = !!pre && (group === 'experimental' || !!retention);
 
+  const section = player.section_id ? await repo.getSection(player.section_id) : null;
   return {
+    section: section ? { id: section.id, name: section.name } : null,
     player: { id: player.id, nickname: player.nickname, group, consentAt: player.consent_at },
     canPlay, settings: { retentionDays: settings.retentionDays, minRoundsForPost: settings.minRoundsForPost },
     unlockedLevel: unlockedLevels(sessions), maxLevel: MAX_LEVEL, unlockAccuracy: UNLOCK_ACCURACY,

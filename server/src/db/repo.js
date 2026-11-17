@@ -14,7 +14,7 @@ const toSession = (r) => r && ({
   id: r.id, playerId: r.player_id, level: r.level, scenarioIds: r.scenario_ids || [],
   score: r.score, correct: r.correct, answered: r.answered, currentStreak: r.current_streak,
   maxStreak: r.max_streak, startedAt: r.started_at, finishedAt: r.finished_at, nickname: r.nickname,
-  mode: r.mode || 'classic', language: r.language || null,
+  mode: r.mode || 'classic', language: r.language || null, challengeDate: r.challenge_date || null,
 });
 
 const scenarioValues = (s) => [
@@ -135,8 +135,68 @@ export function createRepo(driver) {
     async countScenarios() { return (await one('SELECT COUNT(*) AS c FROM scenarios')).c; },
 
     // ── sessions & answers ──
-    async createSession({ playerId, level, scenarioIds, mode = 'classic', language = null }) {
-      return toSession(await one('INSERT INTO game_sessions (player_id, level, scenario_ids, mode, language) VALUES ($1, $2, $3, $4, $5) RETURNING *', [playerId, level, scenarioIds, mode, language]));
+    async createSession({ playerId, level, scenarioIds, mode = 'classic', language = null, challengeDate = null }) {
+      return toSession(await one('INSERT INTO game_sessions (player_id, level, scenario_ids, mode, language, challenge_date) VALUES ($1, $2, $3, $4, $5, $6) RETURNING *', [playerId, level, scenarioIds, mode, language, challengeDate]));
+    },
+    async getDailySession(playerId, date) {
+      return toSession(await one('SELECT * FROM game_sessions WHERE player_id = $1 AND challenge_date = $2', [playerId, date]));
+    },
+    async dailyLeaderboard(date, limit = 10) {
+      return q(`SELECT p.nickname, sec.name AS section, s.score, s.correct, s.answered
+        FROM game_sessions s JOIN players p ON p.id = s.player_id LEFT JOIN sections sec ON sec.id = p.section_id
+        WHERE s.challenge_date = $1 AND s.finished_at IS NOT NULL ORDER BY s.score DESC, s.correct DESC, s.id LIMIT $2`, [date, limit]);
+    },
+    async listPlayerDailyDates(playerId) {
+      return (await q('SELECT challenge_date FROM game_sessions WHERE player_id = $1 AND challenge_date IS NOT NULL AND finished_at IS NOT NULL', [playerId])).map((r) => r.challenge_date);
+    },
+    async listPlayerAnswerFacts(playerId) {
+      return q(`SELECT a.session_id, a.is_correct, a.flags_found, a.link_clicked, s.channel, s.language, s.is_phishing, s.red_flags, s.links
+        FROM answers a JOIN game_sessions g ON g.id = a.session_id JOIN scenarios s ON s.id = a.scenario_id WHERE g.player_id = $1`, [playerId]);
+    },
+
+    // ── badges ──
+    async getBadges(playerId) { return q('SELECT badge_id, earned_at FROM player_badges WHERE player_id = $1 ORDER BY earned_at', [playerId]); },
+    async awardBadges(playerId, ids) {
+      for (const id of ids) await q('INSERT INTO player_badges (player_id, badge_id) VALUES ($1, $2) ON CONFLICT (player_id, badge_id) DO NOTHING', [playerId, id]);
+    },
+    async badgeCounts() { return q('SELECT badge_id, COUNT(*) AS n FROM player_badges GROUP BY badge_id'); },
+
+    // ── sections (classes) ──
+    async createSection({ name, joinCode, ownerAdminId }) {
+      return one('INSERT INTO sections (name, join_code, owner_admin_id) VALUES ($1, $2, $3) RETURNING *', [name, joinCode, ownerAdminId ?? null]);
+    },
+    async getSection(id) { return validId(id) ? one('SELECT * FROM sections WHERE id = $1', [Number(id)]) : undefined; },
+    async getSectionByCode(code) { return one('SELECT * FROM sections WHERE upper(join_code) = upper($1)', [String(code || '').trim()]); },
+    async listSections() {
+      return q(`SELECT sec.*, a.username AS owner_username,
+          (SELECT COUNT(*) FROM players p WHERE p.section_id = sec.id) AS players
+        FROM sections sec LEFT JOIN admins a ON a.id = sec.owner_admin_id ORDER BY sec.id`);
+    },
+    async updateSection(id, { name, ownerAdminId }) {
+      return one('UPDATE sections SET name = COALESCE($2, name), owner_admin_id = COALESCE($3, owner_admin_id) WHERE id = $1 RETURNING *', [id, name ?? null, ownerAdminId ?? null]);
+    },
+    async deleteSection(id) { return (await driver.query('DELETE FROM sections WHERE id = $1', [id])).rowCount > 0; },
+    async setPlayerSection(playerId, sectionId) { await q('UPDATE players SET section_id = $2 WHERE id = $1', [playerId, sectionId]); },
+    async classLeaderboard() {
+      return q(`SELECT sec.id, sec.name, COUNT(DISTINCT p.id) AS members,
+          COUNT(DISTINCT s.player_id) AS active_players,
+          CAST(COALESCE(SUM(s.score), 0) AS INTEGER) AS total_score,
+          CAST(COALESCE(SUM(s.correct), 0) AS INTEGER) AS correct,
+          CAST(COALESCE(SUM(s.answered), 0) AS INTEGER) AS answered
+        FROM sections sec JOIN players p ON p.section_id = sec.id
+        LEFT JOIN game_sessions s ON s.player_id = p.id AND s.finished_at IS NOT NULL
+        GROUP BY sec.id, sec.name`);
+    },
+
+    // ── certificates ──
+    async getCertificateByPlayer(playerId) { return one('SELECT * FROM certificates WHERE player_id = $1', [playerId]); },
+    async getCertificate(code) { return one('SELECT * FROM certificates WHERE code = $1', [String(code || '').trim().toUpperCase()]); },
+    async upsertCertificate(c) {
+      return one(`INSERT INTO certificates (code, player_id, nickname, pre_percent, post_percent, retention_percent, rounds, accuracy, badges)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+        ON CONFLICT (player_id) DO UPDATE SET nickname = excluded.nickname, pre_percent = excluded.pre_percent, post_percent = excluded.post_percent,
+          retention_percent = excluded.retention_percent, rounds = excluded.rounds, accuracy = excluded.accuracy, badges = excluded.badges, updated_at = CURRENT_TIMESTAMP
+        RETURNING *`, [c.code, c.playerId, c.nickname, c.prePercent, c.postPercent, c.retentionPercent, c.rounds, c.accuracy, c.badges]);
     },
     async getSession(id) { return validId(id) ? toSession(await one('SELECT * FROM game_sessions WHERE id = $1', [Number(id)])) : undefined; },
     async listSessions() {

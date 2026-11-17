@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import { Router } from 'express';
 import { issueAdminToken, requireAdmin } from '../lib/auth.js';
 import { hashPassword, checkHash, validatePassword } from '../lib/admins.js';
@@ -238,6 +239,28 @@ export default function adminRouter(repo) {
     const updated = await repo.updateScenario(req.params.id, s);
     updated ? res.json(updated) : res.status(404).json({ error: 'Not found' });
   });
+  // ── class sections (join codes) ──
+  const JOIN_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  const joinCode = () => [...crypto.randomBytes(6)].map((b) => JOIN_ALPHABET[b % JOIN_ALPHABET.length]).join('');
+  r.get('/admin/sections', async (_req, res) => res.json(await repo.listSections()));
+  r.post('/admin/sections', async (req, res) => {
+    const name = String(req.body?.name || '').trim();
+    if (name.length < 2 || name.length > 60) return res.status(400).json({ error: 'Section name must be 2-60 characters.' });
+    if ((await repo.listSections()).some((x) => x.name.toLowerCase() === name.toLowerCase())) return res.status(409).json({ error: 'A section with that name already exists.' });
+    for (let i = 0; i < 5; i++) {
+      try { return res.status(201).json(await repo.createSection({ name, joinCode: joinCode(), ownerAdminId: req.admin.id })); } catch (e) { if (!/unique|duplicate/i.test(e.message)) throw e; }
+    }
+    res.status(500).json({ error: 'Could not create a unique join code, try again.' });
+  });
+
+  r.delete('/admin/sections/:id', async (req, res) => {
+    const sec = await repo.getSection(req.params.id);
+    if (!sec) return res.status(404).json({ error: 'Not found' });
+    if (req.admin.role !== 'superadmin' && sec.owner_admin_id !== req.admin.id) return res.status(403).json({ error: 'Only the section owner or a super admin can delete it' });
+    await repo.deleteSection(sec.id); // students stay; they just leave the section
+    res.status(204).end();
+  });
+
   r.delete('/admin/scenarios/:id', superOnly, async (req, res) => {
     (await repo.deleteScenario(req.params.id)) ? res.status(204).end() : res.status(404).json({ error: 'Not found' });
   });

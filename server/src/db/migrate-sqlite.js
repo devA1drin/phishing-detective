@@ -104,6 +104,26 @@ export const sqliteMigrations = [
         updated_at TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP), PRIMARY KEY (player_id, category))`);
     },
   },
+  {
+    id: '0005_phase4_gamification',
+    up(db) {
+      db.exec(`CREATE TABLE IF NOT EXISTS sections (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, join_code TEXT NOT NULL UNIQUE,
+        owner_admin_id INTEGER REFERENCES admins(id) ON DELETE SET NULL, created_at TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP))`);
+      addColumn(db, 'players', 'section_id', 'INTEGER REFERENCES sections(id) ON DELETE SET NULL');
+      db.exec('CREATE INDEX IF NOT EXISTS idx_players_section ON players(section_id)');
+      addColumn(db, 'game_sessions', 'challenge_date', 'TEXT');
+      db.exec('CREATE UNIQUE INDEX IF NOT EXISTS uq_daily_attempt ON game_sessions(player_id, challenge_date) WHERE challenge_date IS NOT NULL');
+      db.exec(`CREATE TABLE IF NOT EXISTS player_badges (
+        player_id INTEGER NOT NULL REFERENCES players(id) ON DELETE CASCADE, badge_id TEXT NOT NULL,
+        earned_at TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP), PRIMARY KEY (player_id, badge_id))`);
+      db.exec(`CREATE TABLE IF NOT EXISTS certificates (
+        code TEXT PRIMARY KEY, player_id INTEGER NOT NULL UNIQUE REFERENCES players(id) ON DELETE CASCADE,
+        nickname TEXT NOT NULL, pre_percent REAL, post_percent REAL, retention_percent REAL,
+        rounds INTEGER NOT NULL DEFAULT 0, accuracy REAL, badges INTEGER NOT NULL DEFAULT 0,
+        issued_at TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP), updated_at TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP))`);
+    },
+  },
 ];
 
 export function migrateSqlite(db) {

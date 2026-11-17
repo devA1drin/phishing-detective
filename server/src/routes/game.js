@@ -7,6 +7,8 @@ import { adaptiveWeight } from '../lib/adaptive.js';
 import { categoryOutcomes, weakCategories } from '../lib/categories.js';
 import { coachText } from '../lib/ai.js';
 import { coachLimiter } from '../lib/ratelimit.js';
+import { DAILY_SIZE, dailyPick, dayStreak, manilaDate } from '../lib/daily.js';
+import { evaluateBadges } from '../lib/badges.js';
 
 export default function gameRouter(repo) {
   const r = Router();
@@ -25,6 +27,7 @@ export default function gameRouter(repo) {
     const level = Number(req.body?.level) || 1;
     const mode = req.body?.mode || 'classic';
     const language = req.body?.language || 'all';
+    if (mode === 'daily') return startDaily(req, res);
     if (!MODES.includes(mode)) return res.status(400).json({ error: `mode must be one of ${MODES.join(', ')}` });
     if (!LANGUAGE_FILTERS.includes(language)) return res.status(400).json({ error: `language must be one of ${LANGUAGE_FILTERS.join(', ')}` });
     const player = await repo.getPlayer(playerId);
@@ -44,6 +47,34 @@ export default function gameRouter(repo) {
     // Inbox: one shared clock for the whole inbox (80% of the per-message limits combined)
     if (mode === 'inbox') out.inboxTimeLimit = Math.round(scenarios.reduce((a, x) => a + x.timeLimit, 0) * 0.8);
     res.status(201).json(out);
+  });
+
+  // Daily challenge: same cases for everyone today, one attempt each (counts for the daily board)
+  async function startDaily(req, res) {
+    const player = await repo.getPlayer(req.playerId);
+    if (!player) return res.status(404).json({ error: 'Player not found' });
+    const prog = await buildProgress(repo, player);
+    if (!prog.canPlay) return res.status(403).json({ error: prog.preQuiz ? 'Your study group plays after the retention quiz. Thanks for your patience!' : 'Take the pre-game quiz first' });
+    const date = manilaDate();
+    if (await repo.getDailySession(player.id, date)) return res.status(409).json({ error: "You already played today's challenge. Come back tomorrow!" });
+    const all = await repo.listScenarios({ activeOnly: true });
+    const picked = dailyPick(all, date);
+    let session;
+    try {
+      session = await repo.createSession({ playerId: player.id, level: 2, scenarioIds: picked.map((s) => s.id), mode: 'daily', language: 'all', challengeDate: date });
+    } catch { return res.status(409).json({ error: "You already played today's challenge. Come back tomorrow!" }); }
+    res.status(201).json({ sessionId: session.id, level: 2, mode: 'daily', date, language: 'all', scenarios: picked.map(publicScenario), adaptive: { on: false, focus: [] } });
+  }
+
+  r.get('/daily', requirePlayer, async (req, res) => {
+    const date = manilaDate();
+    const mine = await repo.getDailySession(req.playerId, date);
+    res.json({
+      date, size: DAILY_SIZE,
+      played: mine ? { finished: !!mine.finishedAt, score: mine.score, correct: mine.correct, answered: mine.answered } : null,
+      streak: dayStreak(await repo.listPlayerDailyDates(req.playerId), date),
+      leaderboard: await repo.dailyLeaderboard(date, 10),
+    });
   });
 
   // Submit an answer for one scenario in the round
@@ -136,7 +167,9 @@ export default function gameRouter(repo) {
       details.push({ linkClicked: !!a.link_clicked, scenarioId: a.scenario_id, label: s ? (s.subject || `${s.channel.toUpperCase()} from ${s.senderName}`) : a.scenario_id, channel: s?.channel, isPhishing: s?.isPhishing, choice: a.choice, isCorrect: !!a.is_correct, points: a.points, timeMs: a.time_ms, flagsFound: a.flags_found });
     }
     const accuracy = session.answered ? Math.round((100 * session.correct) / session.answered) : 0;
+    const { newly } = await evaluateBadges(repo, session.playerId);
     res.json({
+      newBadges: newly, challengeDate: session.challengeDate,
       sessionId: session.id, level: session.level, mode: session.mode, phishedCount: answers.filter((a) => a.link_clicked && !a.is_correct).length, score: session.score, correct: session.correct,
       answered: session.answered, total: session.scenarioIds.length, accuracy, maxStreak: session.maxStreak,
       avgTimeMs: answers.length ? Math.round(answers.reduce((a, x) => a + x.time_ms, 0) / answers.length) : 0,

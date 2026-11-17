@@ -398,3 +398,21 @@ label.checkbox { flex-direction: row; align-items: center; } label.checkbox inpu
 .draft-head { display: flex; justify-content: space-between; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; }
 .draft-grid { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr); gap: 16px; }
 @media (max-width: 860px) { .draft-grid { grid-template-columns: minmax(0, 1fr); } }
+
+/* Phase 4: gamification */
+.badge-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 8px; }
+.badge { display: flex; flex-direction: column; align-items: center; text-align: center; gap: 2px; padding: 10px 6px; border-radius: 12px; border: 1px solid var(--line); opacity: .45; filter: grayscale(1); }
+.badge.earned { opacity: 1; filter: none; border-color: rgba(245,200,76,.55); background: rgba(245,200,76,.08); }
+.badge b { font-size: .78rem; line-height: 1.15; }
+.badge small { font-size: .7rem; color: var(--muted); }
+.badge-icon { font-size: 1.6rem; }
+.new-badges { display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; margin: 10px 0; }
+.new-badges .badge { min-width: 120px; }
+.pop { animation: pop .5s ease-out; }
+@keyframes pop { 0% { transform: scale(.6); opacity: 0; } 70% { transform: scale(1.08); } 100% { transform: scale(1); opacity: 1; } }
+.leaderboard.compact li { padding: 6px 8px; }
+.join-form { display: flex; gap: 8px; margin: 8px 0; }
+.join-form input { flex: 1; min-width: 0; text-transform: uppercase; letter-spacing: .08em; }
+.cert-code { font-size: 1rem; letter-spacing: .06em; color: var(--gold, #f5c84c); }
+.verify { max-width: 760px; margin: 30px auto; padding: 0 16px; }
+.verify-ok { margin-top: 14px; }

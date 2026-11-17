@@ -3,6 +3,7 @@ import { Link, Navigate } from 'react-router-dom';
 import { api } from '../lib/api.js';
 import { usePlayer } from '../lib/player.jsx';
 import { getPrefs, setPrefs } from '../lib/prefs.js';
+import { BadgesCard, CertificateCard, ClassCard, DailyCard } from '../components/Gamification.jsx';
 
 const LEVELS = [
   { n: 1, name: 'Rookie Cases', desc: 'Obvious scams: random numbers, fake prizes, loud urgency.' },
@@ -70,6 +71,8 @@ export default function Hub() {
             {p.postQuiz ? <p>Your score: <b>{p.postQuiz.percent}%</b></p> : p.postQuizUnlocked ? <Link className="btn btn-gold" to="/quiz/post">Take post-quiz</Link> : <p className="muted">🔒 Finish the reading task first.</p>}
           </div>
           {retentionCard}
+          <CertificateCard />
+          <ClassCard section={p.section} onChange={refresh} />
         </section>
       </div>
     );
@@ -107,6 +110,11 @@ export default function Hub() {
           </select>
         </label>
       </div>
+      <section className="hub-grid">
+        <DailyCard me={p.player.nickname} />
+        <BadgesCard />
+        <ClassCard section={p.section} onChange={refresh} />
+      </section>
       <h2 className="section-title">Choose your case level</h2>
       <section className="levels">
         {LEVELS.map((l) => {
@@ -152,6 +160,7 @@ export default function Hub() {
           )}
         </div>
         {p.postQuiz && retentionCard}
+        <CertificateCard />
         <div className="card">
           <h3>🎯 Your weak spots</h3>
           {p.weakSpots.length === 0 ? <p className="muted small">Play a few rounds and we'll show which red flags you miss most. Rounds then adapt to train them.</p> : (
