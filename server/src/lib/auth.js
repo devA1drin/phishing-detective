@@ -1,33 +1,28 @@
-// Minimal stateless admin auth: HMAC-signed, expiring bearer token.
-import crypto from 'node:crypto';
+// Auth middleware for players (nickname + PIN) and admin accounts (roles).
+import { bearer, issue, verify } from './tokens.js';
 
-const secret = () => process.env.ADMIN_SECRET || `pd-${process.env.ADMIN_PASSWORD || 'detective2026'}`;
-const sign = (payload) => crypto.createHmac('sha256', secret()).update(payload).digest('base64url');
+export const issuePlayerToken = (playerId) => issue({ t: 'p', pid: playerId }, 24 * 30);
+export const issueAdminToken = (admin) => issue({ t: 'a', aid: admin.id, role: admin.role }, 8);
 
-export function checkPassword(pw) {
-  const expected = Buffer.from(String(process.env.ADMIN_PASSWORD || 'detective2026'));
-  const got = Buffer.from(String(pw || ''));
-  return got.length === expected.length && crypto.timingSafeEqual(got, expected);
-}
-
-export function issueToken(hours = 8) {
-  const payload = `admin.${Date.now() + hours * 3600_000}`;
-  return `${Buffer.from(payload).toString('base64url')}.${sign(payload)}`;
-}
-
-export function verifyToken(token) {
-  if (!token) return false;
-  const [p, sig] = String(token).split('.');
-  if (!p || !sig) return false;
-  const payload = Buffer.from(p, 'base64url').toString();
-  const expected = sign(payload);
-  if (sig.length !== expected.length || !crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(expected))) return false;
-  return Number(payload.split('.')[1]) > Date.now();
-}
-
-export function requireAdmin(req, res, next) {
-  const h = req.headers.authorization || '';
-  const token = h.startsWith('Bearer ') ? h.slice(7) : req.query.token;
-  if (!verifyToken(token)) return res.status(401).json({ error: 'Admin login required' });
+/** Requires a valid player token; sets req.playerId. */
+export function requirePlayer(req, res, next) {
+  const data = verify(bearer(req));
+  if (!data || data.t !== 'p') return res.status(401).json({ error: 'Please sign in again (nickname + PIN).' });
+  req.playerId = data.pid;
   next();
+}
+
+/** Requires an admin token whose account still exists; optional role allow-list. */
+export function requireAdmin(repo, roles) {
+  return async (req, res, next) => {
+    try {
+      const data = verify(bearer(req) || req.query.token);
+      if (!data || data.t !== 'a') return res.status(401).json({ error: 'Admin login required' });
+      const admin = await repo.getAdmin(data.aid);
+      if (!admin) return res.status(401).json({ error: 'Admin account no longer exists' });
+      if (roles && !roles.includes(admin.role)) return res.status(403).json({ error: 'Not allowed for your role' });
+      req.admin = { id: admin.id, username: admin.username, role: admin.role, displayName: admin.display_name };
+      next();
+    } catch (e) { next(e); }
+  };
 }

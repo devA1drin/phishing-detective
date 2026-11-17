@@ -1,11 +1,11 @@
-// Re-seed scenarios. `npm run seed` wipes ALL data and reloads the scenario bank.
+// Seed scenarios. `--reset` deletes the LOCAL SQLite file only (never touches Postgres).
 import 'dotenv/config';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-if (process.argv.includes('--reset')) {
+if (process.argv.includes('--reset') && !process.env.DATABASE_URL) {
   const file = process.env.DB_FILE ? path.resolve(process.cwd(), process.env.DB_FILE) : path.resolve(__dirname, '../../data/phishing-detective.db');
   for (const f of [file, file + '-wal', file + '-shm']) if (fs.existsSync(f)) fs.unlinkSync(f);
   console.log('[seed] Removed', file);

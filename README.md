@@ -35,11 +35,8 @@ npm start            # open http://localhost:3000
 
 The SQLite database (`server/data/phishing-detective.db`) is created and seeded with **42 scenarios** automatically on first start. No database setup is needed.
 
-### Default admin password
-```
-detective2026
-```
-Change it in `server/.env` → `ADMIN_PASSWORD=...` (and set a random `ADMIN_SECRET`) before running a real study. Educators open **/admin** (or the footer link "Educator dashboard").
+### Admin accounts (no default password)
+There is **no built-in admin password**. On first start, if the `admins` table is empty, the server creates one **superadmin** from `SUPERADMIN_USERNAME` (default `superadmin`) and `SUPERADMIN_PASSWORD` in `server/.env`. Without `SUPERADMIN_PASSWORD` the dashboard stays disabled. Use a long random password (≥ 10 characters with letters and numbers), and set a random `APP_SECRET` for signing tokens. The superadmin then creates **educator** accounts in **/admin → Study & accounts**. Educators open **/admin** (or the footer link "Educator dashboard").
 
 ### Useful scripts
 | Command | What it does |
@@ -47,10 +44,11 @@ Change it in `server/.env` → `ADMIN_PASSWORD=...` (and set a random `ADMIN_SEC
 | `npm run dev` | Runs the server (`node --watch`) and the Vite client together |
 | `npm run build` | Builds the React client to `client/dist` |
 | `npm start` | Starts Express on `PORT` (default 3000) and serves `client/dist` |
-| `npm test` | API integration tests (`node:test`, in-memory SQLite; set `DATABASE_URL` to run them against Postgres) |
-| `npm run test:api` | curl smoke test of the full flow against a running server (`scripts/api-smoke.sh`) |
+| `npm test` | API integration tests (`node:test`, in-memory SQLite) |
+| `npm run test:pg` | Same tests against Postgres (PGlite) after applying `supabase/migrations/*` |
+| `npm run test:api` | End-to-end smoke test against a running server; creates and then deletes one `smoke_*` player (`ADMIN_USER=… ADMIN_PASS_FILE=… npm run test:api -- <url>`) |
 | `npm run demo` | Simulates 12 `demo_student##` players through the real API so the dashboard has sample data |
-| `npm run seed` | **Resets** the database (deletes all players/results) and re-seeds the scenario bank |
+| `npm run seed` | **Resets the local SQLite** database (deletes all players/results) and re-seeds the scenario bank. Never touches Postgres |
 | `python3 scripts/screenshots.py` | Headless Playwright check + screenshots into `screenshots/` |
 
 > ⚠️ Before collecting real study data, run `npm run seed` to wipe test and demo players.
@@ -63,15 +61,16 @@ Production runs on **Vercel**: the static Vite build is served from the CDN and 
 
 - `api/index.js` is the serverless entry. It wraps the same Express app (`createApp()` in `server/src/index.js`).
 - `vercel.json` builds with `npm run build`, serves `client/dist`, rewrites `/api/*` to the function and everything else to `index.html` (SPA fallback). The function region is `sin1` (Singapore, next to the Supabase project).
-- Storage is picked automatically: `DATABASE_URL` set → Postgres (`server/src/db/postgres.js`), otherwise SQLite. See [`docs/supabase-migration.md`](docs/supabase-migration.md).
+- Storage is picked automatically: `DATABASE_URL` set → Postgres (`server/src/db/drivers/postgres.js`), otherwise SQLite. Both share one repository (`server/src/db/repo.js`). Schema changes are **additive migrations** in `supabase/migrations/`, mirrored for SQLite in `server/src/db/migrate-sqlite.js`. See [`docs/supabase-migration.md`](docs/supabase-migration.md).
 
 Vercel environment variables (Project → Settings → Environment Variables):
 
 | Name | Value |
 |---|---|
 | `DATABASE_URL` | Supabase **pooler** URL (port 6543) for the `pd_app` role |
-| `ADMIN_PASSWORD` | educator dashboard password |
-| `ADMIN_SECRET` | long random string used to sign admin tokens |
+| `SUPERADMIN_USERNAME` | first superadmin's username (used only while no admin exists) |
+| `SUPERADMIN_PASSWORD` | first superadmin's password (sensitive; generated randomly, never committed) |
+| `ADMIN_SECRET` or `APP_SECRET` | long random string used to sign player and admin tokens |
 
 Deploy from the CLI:
 ```bash
@@ -85,8 +84,10 @@ Or import the GitHub repo in the Vercel dashboard. The settings in `vercel.json`
 
 ## 2. How the game works
 
-1. **Register** with a nickname or student ID only (3-24 letters/numbers, `_ . -`). No names, emails or passwords are collected. Entering the same ID again resumes progress.
-2. **Pre-game quiz**: 10 messages, Phishing or Legit, no timer and no feedback (so it doesn't teach the answers).
+1. **Consent and register**: read the RA 10173 (Data Privacy Act) notice and tick consent (timestamp + version stored), then choose a nickname or student ID (3-24 letters/numbers, `_ . -`) and a **4-6 digit PIN** (bcrypt-hashed). Sign in again from any device with ID + PIN.
+   - Each new player is **randomly assigned** to the **experimental** (game) or **control** group (ratio configurable; admins can override).
+2. **Pre-game quiz**: 10 messages, Phishing or Legit plus a **confidence rating (1-5)** for each, no timer and no feedback (so it doesn't teach the answers).
+   - **Control group** (wait-list design): a neutral ~5-minute reading task instead of the game, then the post-quiz, then the retention check. The game opens for them after that.
 3. **Timed rounds**: 8 randomized messages per round (40s / 35s / 30s per message for difficulty 1 / 2 / 3).
    - Click anything suspicious (sender, subject, any sentence, links, attachments) to mark it as a **clue**.
    - Hover over (or tap) a link to see its **real URL** in a tooltip and the browser-style status bar.
@@ -94,7 +95,9 @@ Or import the GitHub repo in the Vercel dashboard. The settings in `vercel.json`
 4. **Instant feedback**: verdict, points breakdown, every red flag numbered and highlighted in the message (green = you caught it, red = missed), "why it's safe" for legit messages, and an explanation.
 5. **Round summary**: score, accuracy, best streak, average time, clues found, and a case log.
 6. **Progressive difficulty**: Level 2 unlocks at ≥ 70% accuracy in a Level 1 round; Level 3 at ≥ 70% in Level 2.
-7. **Post-game quiz**: unlocked after at least one finished round. 10 *different* messages, then a full answer review and the player's personal improvement.
+7. **Post-game quiz**: unlocked after at least `minRoundsForPost` finished rounds (default 1). 10 *different* messages with confidence ratings, then a full answer review and the player's personal improvement.
+8. **Delayed retention check**: a third pool of 10 items unlocks `retentionDays` (default 14) after the first post-quiz.
+9. **Surveys**: after the post-quiz, players who played answer the standard **SUS** (10 items, 0-100 score) and an **ISO/IEC 25010** Likert form (16 items, 8 characteristics).
 
 ### Scoring
 | Component | Rule |
@@ -123,13 +126,15 @@ Ranks: Rookie → Detective (1,000) → Senior Inspector (3,000) → Chief Detec
 | Simple gamification | Points, streaks 🔥, ranks, level unlocks, leaderboard |
 | Analytics | Every answer is logged (choice, correctness, time, clues found). `repo.overview()` and `repo.scenarioStats()` aggregate the data |
 | **Expected impact (≥ 20% improvement)** | Pre and post pools in `server/src/data/quiz.js` (10 items each, matched: 6 phishing + 4 legit, difficulty 1-3). The dashboard shows paired first-pre vs first-post averages, the **relative improvement %**, percentage-point change, how many players improved ≥ 20%, and a "Target met" badge |
-| Privacy | Nickname or student ID only. No PII fields exist in the schema |
+| Privacy | Nickname or student ID only, no PII fields. RA 10173 consent screen with stored timestamp/version. PINs and admin passwords are bcrypt-hashed. Superadmins can erase a player and all their rows |
+| Research rigor | Random control/experimental assignment, delayed retention quiz, confidence ratings ("confidently wrong" rate), paired t-test + Wilcoxon per group and Welch + Mann-Whitney between groups (`lib/stats.js`, `lib/analytics.js`), SUS + ISO 25010 instruments (`data/surveys.js`) |
+| Security | Player PIN, admin accounts with roles (superadmin / educator), rate limiting on auth and answer endpoints (`lib/ratelimit.js`), signed tokens, no default passwords |
 
 ### Suggested evaluation protocol (for Chapter 3/4)
 1. Run `npm run seed` to start clean, then deploy or run on a laptop on the campus LAN.
 2. Participants register with an assigned code (e.g. `IS4A-01`) for anonymity.
 3. Pre-quiz → at least 2-3 rounds (ideally reaching Level 2) → post-quiz.
-4. Export `quiz.csv` / `players.csv` from the dashboard. Relative improvement = (post − pre) / pre × 100. A paired t-test or Wilcoxon signed-rank test on `pre_score` vs `post_score` in `players.csv` gives statistical significance.
+4. The dashboard computes the paired t-test and Wilcoxon signed-rank test per group and the between-group comparison of gains. Export `quiz.csv`, `quiz-items.csv` (one row per item with confidence), `players.csv` and `surveys.csv` to verify in SPSS/JASP.
 5. Use **Miss rates** to see which scam types students struggle with most.
 
 Measurement notes: only each player's **first** pre and **first** post attempt are used in the impact numbers (retakes can't inflate results). The pre-quiz can be taken only once and reveals no answers.
@@ -182,37 +187,46 @@ Base URL: `/api`. JSON in and out.
 | Method | Endpoint | Body / query | Description |
 |---|---|---|---|
 | GET | `/health` | | Status + scenario count |
-| POST | `/players` | `{ nickname }` | Register or resume (201 new / 200 existing) |
-| GET | `/players/:id/progress` | | Unlocked level, totals, rank, quiz results, per-level bests |
+| POST | `/players/register` | `{ nickname, pin, consent: true }` | Register (random group); returns `{ token, player }` |
+| POST | `/players/login` | `{ nickname, pin }` | Sign in; returns `{ token, player }` |
+| GET | `/players/me/progress` | *(player token)* | Group, unlocked level, totals, rank, quiz/retention/survey status, per-level bests |
+| POST | `/players/me/reading-done` | *(player token)* | Control group's reading task |
 | GET | `/leaderboard` | | Top 10 by total score |
 | GET | `/scenarios/random` | `?level=1-3&count=n` | Random sanitized scenarios (preview/demo) |
-| POST | `/sessions` | `{ playerId, level }` | Start a round: 8 sanitized scenarios with clickable segments (403 if locked) |
+| POST | `/sessions` | `{ level }` *(player token)* | Start a round: 8 sanitized scenarios with clickable segments (403 if locked) |
 | POST | `/sessions/:id/answers` | `{ scenarioId, choice: "phishing"\|"legit"\|null, timeMs, clickedParts: ["sender","subject","seg:3","link:0","att:0"] }` | Score one answer; returns correctness, points breakdown, red flags (found/missed), safe signs, explanation |
 | POST | `/sessions/:id/finish` | | Round summary + `newlyUnlocked` level |
 
 ### Quizzes
 | Method | Endpoint | Body | Description |
 |---|---|---|---|
-| GET | `/quiz/pre` · `/quiz/post` | | 10 shuffled items (no answers) |
-| POST | `/quiz/:kind/submit` | `{ playerId, answers: [{ itemId, choice }] }` | Grades and stores the attempt. Pre: once only, score only. Post: needs pre + 1 finished round; returns review + improvement |
+| GET | `/quiz/pre` · `/quiz/post` · `/quiz/retention` | | 10 shuffled items (no answers) |
+| POST | `/quiz/:kind/submit` | `{ answers: [{ itemId, choice, confidence: 1-5 }] }` *(player token)* | Grades and stores the attempt. Pre: once only, score only. Post: needs pre + rounds (or reading for control). Retention: once, after the delay |
+| GET | `/surveys/items` | | SUS and ISO 25010 items |
+| POST | `/surveys/sus` · `/surveys/iso25010` | `{ answers }` *(player token)* | One submission each, after the post-quiz |
 
 ### Admin (header `Authorization: Bearer <token>`)
 | Method | Endpoint | Description |
 |---|---|---|
-| POST | `/admin/login` | `{ password }` → `{ token }` |
-| GET | `/admin/stats` | Totals, accuracy, pre/post averages, paired improvement %, target met, by level/channel |
+| POST | `/admin/login` | `{ username, password }` → `{ token, admin }` |
+| GET / PUT | `/admin/settings` | Study settings (`controlRatio`, `retentionDays`, `minRoundsForPost`); PUT is superadmin-only |
+| GET / POST / PUT / DELETE | `/admin/admins[/:id]` | Admin accounts (superadmin only) |
+| PUT | `/admin/me/password` | Change own password |
+| PUT | `/admin/players/:id/group` | Override a player's group |
+| DELETE | `/admin/players/:id` | Erase a player and all their rows (superadmin) |
+| GET | `/admin/stats` | Totals, pre/post/retention, group comparison with significance tests, confidence calibration, SUS/ISO results, by level/channel |
 | GET | `/admin/players` | Players with rounds, score, accuracy, pre/post |
 | GET | `/admin/sessions` | All sessions |
 | GET | `/admin/scenario-stats` | Attempts, misses, miss rate, avg time per scenario |
-| GET | `/admin/export/:kind.csv` | `players`, `sessions`, `answers`, `quiz`, `scenarios` (also accepts `?token=`) |
+| GET | `/admin/export/:kind.csv` | `players`, `sessions`, `answers`, `quiz`, `quiz-items`, `surveys`, `scenarios` (also accepts `?token=`) |
 | GET / POST | `/admin/scenarios` | List / create (validated: red-flag snippets must exist in the body) |
 | GET / PUT / DELETE | `/admin/scenarios/:id` | Read / update / delete |
 
 Example:
 ```bash
-curl -X POST localhost:3000/api/players -H 'Content-Type: application/json' -d '{"nickname":"sherlock_01"}'
-curl -X POST localhost:3000/api/sessions -H 'Content-Type: application/json' -d '{"playerId":1,"level":1}'
-TOKEN=$(curl -s -X POST localhost:3000/api/admin/login -H 'Content-Type: application/json' -d '{"password":"detective2026"}' | node -pe 'JSON.parse(require("fs").readFileSync(0)).token')
+PT=$(curl -s -X POST localhost:3000/api/players/register -H 'Content-Type: application/json' -d '{"nickname":"sherlock_01","pin":"4821","consent":true}' | node -pe 'JSON.parse(require("fs").readFileSync(0)).token')
+curl -X POST localhost:3000/api/sessions -H 'Content-Type: application/json' -H "Authorization: Bearer $PT" -d '{"level":1}'
+TOKEN=$(curl -s -X POST localhost:3000/api/admin/login -H 'Content-Type: application/json' -d "{\"username\":\"superadmin\",\"password\":\"$SUPERADMIN_PASSWORD\"}" | node -pe 'JSON.parse(require("fs").readFileSync(0)).token')
 curl localhost:3000/api/admin/stats -H "Authorization: Bearer $TOKEN"
 ```
 
@@ -253,8 +267,8 @@ The admin screenshots use simulated `demo_student##` data from `npm run demo`. T
 ---
 
 ## 7. Limitations & future work
-- Player identity is the nickname only (no password), so anyone who knows an ID can continue that player's progress. That's acceptable for anonymous classroom use. Add a PIN or university SSO for high-stakes use.
-- Admin auth is a single shared password (no user accounts or roles).
+- Player PINs are short by design (4-6 digits) and are protected by bcrypt plus rate limiting; use university SSO for high-stakes use.
+- Rate limits use an in-memory store, so on Vercel they apply per warm function instance (enough to stop bursts, not a global quota).
 - `timeMs` is reported by the client (clamped server-side). A determined player could fake fast times for a higher time bonus. This doesn't affect quiz-based impact measurement.
 - Quiz items live in code so the study instrument stays fixed. Editing them requires a code change (by design).
 - SQLite is for local development only. Production uses Supabase Postgres (free tier: the project pauses after about a week of inactivity and must be resumed from the Supabase dashboard).

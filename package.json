@@ -14,7 +14,8 @@
     "seed": "npm run seed -w server",
     "test": "npm test -w server",
     "demo": "node scripts/demo-data.mjs",
-    "test:api": "bash scripts/api-smoke.sh"
+    "test:api": "node scripts/api-smoke.mjs",
+    "test:pg": "node scripts/test-pg.mjs"
   },
   "devDependencies": {
     "concurrently": "^9.1.0"

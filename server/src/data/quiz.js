@@ -1,4 +1,4 @@
-// Pre-game and post-game quiz pools (separate items, matched in difficulty and
+// Pre-game, post-game and delayed-retention quiz pools (separate items, matched in difficulty and
 // phishing/legit ratio: 6 phishing + 4 legit, levels 1-3) so detection rate can
 // be compared before vs after playing.
 // `url` is the real destination of any link mentioned in the message.
@@ -67,5 +67,37 @@ export const quizPools = {
     { id: 'post-10', channel: 'email', difficulty: 3, isPhishing: true, sender: 'hr@petron-careers.org', subject: 'Paid internship offer',
       body: 'Congratulations, you were selected without interview! Send a copy of your ID and bank details today to process your allowance. Attachment: Offer_Letter.pdf.exe', url: null,
       explanation: 'No interview, data request, fake domain and a double-extension attachment.' },
+  ],
+  retention: [
+    { id: 'ret-1', channel: 'sms', difficulty: 1, isPhishing: true, sender: '+639175560021',
+      body: 'Maya: Your account is restricted. Verify your identity within 6 hours: maya-verify.ph-login.net', url: 'http://maya-verify.ph-login.net',
+      explanation: 'Random number, threat and a link that is not maya.ph.' },
+    { id: 'ret-2', channel: 'email', difficulty: 1, isPhishing: false, sender: 'library@urs.edu.ph', subject: 'New e-journal databases available',
+      body: 'The URS Library now offers access to new e-journal databases. Log in through the library page on urs.edu.ph using your existing account.', url: 'https://urs.edu.ph/library',
+      explanation: 'Official domain, informational, no request for data.' },
+    { id: 'ret-3', channel: 'social', difficulty: 1, isPhishing: true, sender: 'Messenger · Shopee Giveaway PH',
+      body: 'Congrats! You won a Shopee voucher worth P10,000. Send P299 via GCash to activate it.', url: null,
+      explanation: 'Unexpected prize plus a fee = scam.' },
+    { id: 'ret-4', channel: 'sms', difficulty: 1, isPhishing: false, sender: 'BPI',
+      body: 'BPI: Your One-Time PIN is 739204. Never share your OTP with anyone. BPI will never call or text to ask for it.', url: null,
+      explanation: 'Official sender ID, no link, warns you not to share.' },
+    { id: 'ret-5', channel: 'email', difficulty: 2, isPhishing: true, sender: 'scholarship@ched-gov-ph.org', subject: 'Tulong Dunong grant release',
+      body: 'Your Tulong Dunong grant is ready. Submit your bank account number and a selfie with your ID at ched-gov-ph.org/claim.', url: 'https://ched-gov-ph.org/claim',
+      explanation: 'Fake .org domain imitating .gov.ph and a request for sensitive data.' },
+    { id: 'ret-6', channel: 'email', difficulty: 2, isPhishing: false, sender: 'no-reply@notification.lazada.com.ph', subject: 'Your refund has been processed',
+      body: 'Your refund of P349 for order #6620118 has been credited to your Lazada Wallet. View details in the app under My Returns.', url: null,
+      explanation: 'Real Lazada subdomain, verifiable in the app, no link.' },
+    { id: 'ret-7', channel: 'social', difficulty: 2, isPhishing: true, sender: 'Telegram · HR Shopee Affiliate',
+      body: 'Earn P5,000 daily by rating products! Just deposit P500 first to activate your task account.', url: 't.me/shopee_tasks_ph',
+      explanation: 'Task scam: unrealistic pay and a deposit to "unlock" earnings.' },
+    { id: 'ret-8', channel: 'email', difficulty: 3, isPhishing: true, sender: 'Prof. R. Santos <r.santos.urs@outlook.com>', subject: 'Re: Capstone defense schedule',
+      body: 'Please review the updated defense schedule in the attached file and sign in with your school account to open it. Attachment: Defense_Schedule.html', url: null,
+      explanation: 'Personal email impersonating faculty, fake reply thread and an HTML attachment that opens a fake login.' },
+    { id: 'ret-9', channel: 'email', difficulty: 3, isPhishing: false, sender: 'no-reply@classroom.google.com', subject: 'Prof. R. Santos returned your assignment',
+      body: 'Your work for "Capstone Chapter 2" was returned with a grade. Open Google Classroom to view the private comment.', url: 'https://classroom.google.com',
+      explanation: 'Google Classroom domain and link, matches a class you are in.' },
+    { id: 'ret-10', channel: 'sms', difficulty: 3, isPhishing: true, sender: 'GCash',
+      body: 'GCash: Your GCredit limit was increased to P30,000. Confirm within today to keep it: gcash.com-gcredit.info', url: 'https://gcash.com-gcredit.info',
+      explanation: 'Spoofed sender ID; the real domain is com-gcredit.info. GCash never sends links by SMS.' },
   ],
 };

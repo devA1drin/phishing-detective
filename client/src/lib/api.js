@@ -1,3 +1,8 @@
+const PLAYER_KEY = 'pd.player';
+export const playerToken = () => {
+  try { return JSON.parse(localStorage.getItem(PLAYER_KEY))?.token || null; } catch { return null; }
+};
+
 async function request(method, url, body, token) {
   const headers = {};
   if (body !== undefined) headers['Content-Type'] = 'application/json';
@@ -7,31 +12,46 @@ async function request(method, url, body, token) {
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
     const err = new Error(data.error || `Request failed (${res.status})`);
-    err.status = res.status; err.details = data.details;
+    err.status = res.status; err.details = data.details; err.data = data;
     throw err;
   }
   return data;
 }
+// Player calls carry the player's signed token automatically
+const p = (method, url, body) => request(method, url, body, playerToken());
 
 export const api = {
-  register: (nickname) => request('POST', '/api/players', { nickname }),
-  progress: (id) => request('GET', `/api/players/${id}/progress`),
+  register: (nickname, pin, consent) => request('POST', '/api/players/register', { nickname, pin, consent }),
+  login: (nickname, pin) => request('POST', '/api/players/login', { nickname, pin }),
+  progress: () => p('GET', '/api/players/me/progress'),
+  readingDone: () => p('POST', '/api/players/me/reading-done'),
   leaderboard: () => request('GET', '/api/leaderboard'),
-  startSession: (playerId, level) => request('POST', '/api/sessions', { playerId, level }),
-  answer: (sessionId, payload) => request('POST', `/api/sessions/${sessionId}/answers`, payload),
-  finish: (sessionId) => request('POST', `/api/sessions/${sessionId}/finish`),
+  startSession: (level) => p('POST', '/api/sessions', { level }),
+  answer: (sessionId, payload) => p('POST', `/api/sessions/${sessionId}/answers`, payload),
+  finish: (sessionId) => p('POST', `/api/sessions/${sessionId}/finish`),
   quiz: (kind) => request('GET', `/api/quiz/${kind}`),
-  submitQuiz: (kind, playerId, answers) => request('POST', `/api/quiz/${kind}/submit`, { playerId, answers }),
+  submitQuiz: (kind, answers) => p('POST', `/api/quiz/${kind}/submit`, { answers }),
+  surveyItems: () => request('GET', '/api/surveys/items'),
+  submitSurvey: (kind, answers) => p('POST', `/api/surveys/${kind}`, { answers }),
   admin: {
-    login: (password) => request('POST', '/api/admin/login', { password }),
+    login: (username, password) => request('POST', '/api/admin/login', { username, password }),
+    me: (t) => request('GET', '/api/admin/me', undefined, t),
+    changePassword: (t, currentPassword, newPassword) => request('PUT', '/api/admin/me/password', { currentPassword, newPassword }, t),
     stats: (t) => request('GET', '/api/admin/stats', undefined, t),
     players: (t) => request('GET', '/api/admin/players', undefined, t),
+    setGroup: (t, id, group) => request('PUT', `/api/admin/players/${id}/group`, { group }, t),
     sessions: (t) => request('GET', '/api/admin/sessions', undefined, t),
     scenarioStats: (t) => request('GET', '/api/admin/scenario-stats', undefined, t),
     scenarios: (t) => request('GET', '/api/admin/scenarios', undefined, t),
     createScenario: (t, s) => request('POST', '/api/admin/scenarios', s, t),
     updateScenario: (t, id, s) => request('PUT', `/api/admin/scenarios/${id}`, s, t),
     deleteScenario: (t, id) => request('DELETE', `/api/admin/scenarios/${id}`, undefined, t),
+    admins: (t) => request('GET', '/api/admin/admins', undefined, t),
+    createAdmin: (t, a) => request('POST', '/api/admin/admins', a, t),
+    updateAdmin: (t, id, a) => request('PUT', `/api/admin/admins/${id}`, a, t),
+    deleteAdmin: (t, id) => request('DELETE', `/api/admin/admins/${id}`, undefined, t),
+    settings: (t) => request('GET', '/api/admin/settings', undefined, t),
+    saveSettings: (t, s) => request('PUT', '/api/admin/settings', s, t),
     async download(t, kind) {
       const res = await fetch(`/api/admin/export/${kind}.csv`, { headers: { Authorization: `Bearer ${t}` } });
       if (!res.ok) throw new Error('Export failed');

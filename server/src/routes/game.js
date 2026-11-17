@@ -1,5 +1,8 @@
 import { Router } from 'express';
 import { pickScenarios, publicScenario, scoreAnswer, unlockedLevels, UNLOCK_ACCURACY, MAX_LEVEL } from '../lib/game.js';
+import { requirePlayer } from '../lib/auth.js';
+import { answerLimiter } from '../lib/ratelimit.js';
+import { buildProgress } from '../lib/progress.js';
 
 export default function gameRouter(repo) {
   const r = Router();
@@ -13,11 +16,13 @@ export default function gameRouter(repo) {
   });
 
   // Start a round
-  r.post('/sessions', async (req, res) => {
-    const playerId = Number(req.body?.playerId);
+  r.post('/sessions', requirePlayer, async (req, res) => {
+    const playerId = req.playerId;
     const level = Number(req.body?.level) || 1;
     const player = await repo.getPlayer(playerId);
     if (!player) return res.status(404).json({ error: 'Player not found' });
+    const prog = await buildProgress(repo, player);
+    if (!prog.canPlay) return res.status(403).json({ error: prog.preQuiz ? 'Your study group plays after the retention quiz. Thanks for your patience!' : 'Take the pre-game quiz first' });
     const unlocked = unlockedLevels(await repo.listPlayerSessions(playerId));
     if (level < 1 || level > unlocked) return res.status(403).json({ error: `Level ${level} is locked. Reach ${UNLOCK_ACCURACY}% accuracy on level ${unlocked} to unlock it.`, unlockedLevel: unlocked });
     const all = await repo.listScenarios({ activeOnly: true });
@@ -28,9 +33,9 @@ export default function gameRouter(repo) {
   });
 
   // Submit an answer for one scenario in the round
-  r.post('/sessions/:id/answers', async (req, res) => {
+  r.post('/sessions/:id/answers', requirePlayer, answerLimiter, async (req, res) => {
     const session = await repo.getSession(Number(req.params.id));
-    if (!session) return res.status(404).json({ error: 'Session not found' });
+    if (!session || session.playerId !== req.playerId) return res.status(404).json({ error: 'Session not found' });
     if (session.finishedAt) return res.status(409).json({ error: 'Session already finished' });
     const { scenarioId, choice, timeMs, clickedParts } = req.body || {};
     if (!session.scenarioIds.includes(scenarioId)) return res.status(400).json({ error: 'Scenario not part of this session' });
@@ -55,9 +60,9 @@ export default function gameRouter(repo) {
   });
 
   // Finish a round and get the summary
-  r.post('/sessions/:id/finish', async (req, res) => {
+  r.post('/sessions/:id/finish', requirePlayer, async (req, res) => {
     const before = await repo.getSession(Number(req.params.id));
-    if (!before) return res.status(404).json({ error: 'Session not found' });
+    if (!before || before.playerId !== req.playerId) return res.status(404).json({ error: 'Session not found' });
     const prevUnlocked = unlockedLevels((await repo.listPlayerSessions(before.playerId)).filter((s) => s.id !== before.id));
     const session = await repo.finishSession(before.id);
     const unlocked = unlockedLevels(await repo.listPlayerSessions(session.playerId));

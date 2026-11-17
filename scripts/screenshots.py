@@ -1,6 +1,6 @@
 # Headless browser check + screenshots (Playwright for Python, Chrome channel).
 # Usage: python3 scripts/screenshots.py [base_url]
-import sys, random
+import sys, random, os
 from playwright.sync_api import sync_playwright
 BASE = sys.argv[1] if len(sys.argv) > 1 else 'http://localhost:3000'
 OUT = 'screenshots/'
@@ -44,7 +44,7 @@ with sync_playwright() as p:
     pg.click('.feedback .btn-gold'); pg.wait_for_selector('.summary'); pg.wait_for_timeout(400)
     pg.screenshot(path=OUT + '07-round-summary.png', full_page=True)
     # admin
-    pg.goto(BASE + '/admin'); pg.fill('#pw', 'detective2026'); pg.click('button:has-text("Sign in")')
+    pg.goto(BASE + '/admin'); pg.fill('#un', os.environ.get('ADMIN_USER', 'superadmin')); pg.fill('#pw', open(os.environ['ADMIN_PASS_FILE']).read().strip()); pg.click('button:has-text("Sign in")')
     pg.wait_for_selector('.kpis'); pg.wait_for_timeout(500)
     pg.screenshot(path=OUT + '08-admin-dashboard.png', full_page=True)
     pg.click('text=Miss rates'); pg.wait_for_timeout(300); pg.screenshot(path=OUT + '09-admin-miss-rates.png')

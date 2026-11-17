@@ -27,7 +27,7 @@ export default function Game() {
   useEffect(() => {
     if (started.current) return;
     started.current = true;
-    api.startSession(player.id, Number(level)).then(setSession).catch((e) => setError(e.message));
+    api.startSession(Number(level)).then(setSession).catch((e) => setError(e.message));
   }, [player.id, level]);
 
   const scenario = session?.scenarios[idx];

@@ -13,22 +13,25 @@ export default function Admin() {
 }
 
 function AdminLogin({ onLogin }) {
+  const [username, setUsername] = useState('');
   const [pw, setPw] = useState('');
   const [err, setErr] = useState('');
   const submit = async (e) => {
     e.preventDefault();
-    try { onLogin((await api.admin.login(pw)).token); } catch (e2) { setErr(e2.message); }
+    try { onLogin((await api.admin.login(username.trim(), pw)).token); } catch (e2) { setErr(e2.message); }
   };
   return (
     <form className="card narrow admin-login" onSubmit={submit}>
       <span className="eyebrow">Educator access</span>
       <h1>Admin dashboard</h1>
-      <p className="muted">View player progress, pre/post quiz results and manage the scenario bank.</p>
+      <p className="muted">View player progress, study results and manage the scenario bank.</p>
+      <label htmlFor="un">Username</label>
+      <input id="un" value={username} onChange={(e) => setUsername(e.target.value)} autoComplete="username" required />
       <label htmlFor="pw">Password</label>
-      <input id="pw" type="password" value={pw} onChange={(e) => setPw(e.target.value)} placeholder="Admin password" required />
+      <input id="pw" type="password" value={pw} onChange={(e) => setPw(e.target.value)} autoComplete="current-password" required />
       {err && <p className="error">{err}</p>}
       <button className="btn btn-gold block">Sign in</button>
-      <p className="muted small">The default password is set in <code>server/.env</code> (<code>ADMIN_PASSWORD</code>). See the README.</p>
+      <p className="muted small">Accounts are created by a superadmin. The first superadmin comes from the <code>SUPERADMIN_USERNAME</code> / <code>SUPERADMIN_PASSWORD</code> environment variables (see the README).</p>
     </form>
   );
 }
@@ -40,21 +43,21 @@ function Dashboard({ token, onLogout }) {
 
   const load = async () => {
     try {
-      const [stats, players, sessions, scenarioStats, scenarios] = await Promise.all([
-        api.admin.stats(token), api.admin.players(token), api.admin.sessions(token), api.admin.scenarioStats(token), api.admin.scenarios(token),
+      const [me, stats, players, sessions, scenarioStats, scenarios] = await Promise.all([
+        api.admin.me(token), api.admin.stats(token), api.admin.players(token), api.admin.sessions(token), api.admin.scenarioStats(token), api.admin.scenarios(token),
       ]);
-      setData({ stats, players, sessions, scenarioStats, scenarios });
+      setData({ me, stats, players, sessions, scenarioStats, scenarios });
     } catch (e) {
       if (e.status === 401) onLogout(); else setError(e.message);
     }
   };
   useEffect(() => { load(); }, []); // eslint-disable-line
 
-  const tabs = [['overview', '📊 Overview'], ['scenarios-stats', '🎯 Miss rates'], ['players', '🕵️ Players'], ['sessions', '🎮 Sessions'], ['manage', '🗂 Scenario bank']];
+  const tabs = [['overview', '📊 Overview'], ['scenarios-stats', '🎯 Miss rates'], ['players', '🕵️ Players'], ['sessions', '🎮 Sessions'], ['manage', '🗂 Scenario bank'], ['study', '⚙️ Study & accounts']];
   return (
     <div className="admin">
       <div className="admin-head">
-        <div><span className="eyebrow">Educator dashboard</span><h1>Phishing Detective analytics</h1></div>
+        <div><span className="eyebrow">Educator dashboard{data.me ? ` · ${data.me.displayName || data.me.username} (${data.me.role})` : ''}</span><h1>Phishing Detective analytics</h1></div>
         <div className="admin-actions">
           <ExportMenu token={token} />
           <button className="btn btn-ghost" onClick={load}>↻ Refresh</button>
@@ -69,9 +72,10 @@ function Dashboard({ token, onLogout }) {
         <>
           {tab === 'overview' && <Overview s={data.stats} />}
           {tab === 'scenarios-stats' && <MissRates rows={data.scenarioStats} />}
-          {tab === 'players' && <Players rows={data.players} />}
+          {tab === 'players' && <Players rows={data.players} token={token} reload={load} />}
           {tab === 'sessions' && <Sessions rows={data.sessions} />}
           {tab === 'manage' && <ScenarioManager token={token} scenarios={data.scenarios} reload={load} />}
+          {tab === 'study' && <StudyAdmin token={token} me={data.me} />}
         </>
       )}
     </div>
@@ -84,7 +88,7 @@ function ExportMenu({ token }) {
   return (
     <div className="export">
       <span className="small muted">Export CSV:</span>
-      {['players', 'sessions', 'answers', 'quiz', 'scenarios'].map((k) => <button key={k} className="btn btn-sm" onClick={() => dl(k)}>{k}</button>)}
+      {['players', 'sessions', 'answers', 'quiz', 'quiz-items', 'surveys', 'scenarios'].map((k) => <button key={k} className="btn btn-sm" onClick={() => dl(k)}>{k}</button>)}
       {msg && <span className="error small">{msg}</span>}
     </div>
   );
@@ -106,7 +110,7 @@ function Overview({ s }) {
         <div className="impact-head">
           <div>
             <h3>Expected impact: ≥ 20% improvement in detection rate</h3>
-            <p className="muted small">Paired comparison of each player's first pre-game vs first post-game quiz ({q.pairedCount} player{q.pairedCount === 1 ? '' : 's'} with both).</p>
+            <p className="muted small">Experimental group: paired comparison of each player's first pre-game vs first post-game quiz ({q.experimentalPairedCount ?? 0} with both). Bars show all {q.pairedCount} paired players.</p>
           </div>
           {q.targetMet != null && <span className={`pill big-pill ${q.targetMet ? 'pill-green' : 'pill-red'}`}>{q.targetMet ? '✅ Target met' : '⏳ Below target'}</span>}
         </div>
@@ -123,12 +127,17 @@ function Overview({ s }) {
           <div className="impact-num">
             <b className={q.improvementPercent >= 20 ? 'good' : ''}>{q.improvementPercent == null ? '-' : `${q.improvementPercent > 0 ? '+' : ''}${q.improvementPercent}%`}</b>
             <span>relative improvement</span>
-            <small>{q.improvementPoints == null ? '' : `${q.improvementPoints > 0 ? '+' : ''}${q.improvementPoints} percentage points · ${q.playersImprovedBy20}/${q.pairedCount} players improved ≥20%`}</small>
+            <small>{q.improvementPoints == null ? '' : `${q.improvementPoints > 0 ? '+' : ''}${q.improvementPoints} percentage points · ${q.playersImprovedBy20}/${q.experimentalPairedCount} players improved ≥20%`}</small>
           </div>
         </div>
-        <p className="muted small">All attempts: {q.preCount} pre-quizzes (avg {fmt(q.avgPre, '%')}), {q.postCount} post-quizzes (avg {fmt(q.avgPost, '%')}).</p>
+        <p className="muted small">All attempts: {q.preCount} pre-quizzes (avg {fmt(q.avgPre, '%')}), {q.postCount} post-quizzes (avg {fmt(q.avgPost, '%')}), {q.retentionCount} retention checks (avg {fmt(q.avgRetention, '%')}).</p>
       </div>
 
+      <GroupComparison s={s} />
+      <div className="two-col">
+        <ConfidenceCard c={s.confidence} />
+        <SurveyCard v={s.surveys} />
+      </div>
       <div className="two-col">
         <div className="card"><h3>Accuracy by level</h3><MiniBars rows={s.byLevel.map((r) => [`Level ${r.level}`, r.accuracy, `${r.n} answers`])} /></div>
         <div className="card"><h3>Accuracy by channel</h3><MiniBars rows={s.byChannel.map((r) => [r.channel.toUpperCase(), r.accuracy, `${r.n} answers`])} /></div>
@@ -174,24 +183,174 @@ function MissRates({ rows }) {
   );
 }
 
-function Players({ rows }) {
+function Players({ rows, token, reload }) {
+  const [err, setErr] = useState('');
+  const setGroup = async (id, group) => {
+    try { await api.admin.setGroup(token, id, group); reload(); } catch (e) { setErr(e.message); }
+  };
   return (
     <div className="card">
       <h3>Players ({rows.length})</h3>
+      <p className="muted small">Players are randomly assigned at registration (ratio in Study settings). Changing a group here marks it as an admin override.</p>
+      {err && <p className="error">{err}</p>}
       <div className="table-wrap">
         <table className="table">
-          <thead><tr><th>Nickname / ID</th><th>Joined</th><th className="num">Rounds</th><th className="num">Score</th><th className="num">Max lvl</th><th className="num">Accuracy</th><th className="num">Pre</th><th className="num">Post</th><th className="num">Δ</th></tr></thead>
+          <thead><tr><th>Nickname / ID</th><th>Group</th><th>Joined</th><th className="num">Rounds</th><th className="num">Score</th><th className="num">Accuracy</th><th className="num">Pre</th><th className="num">Post</th><th className="num">Retention</th><th className="num">Δ</th></tr></thead>
           <tbody>
             {rows.map((p) => (
               <tr key={p.id}>
-                <td><b>{p.nickname}</b></td><td className="small muted">{p.created_at}</td>
-                <td className="num">{p.sessions}</td><td className="num">{p.total_score}</td><td className="num">{p.max_level || '-'}</td>
-                <td className="num">{fmt(p.accuracy, '%')}</td><td className="num">{fmt(p.pre_score, '%')}</td><td className="num">{fmt(p.post_score, '%')}</td>
+                <td><b>{p.nickname}</b>{!p.consent_at && <div className="muted small">no consent record (legacy)</div>}</td>
+                <td>
+                  <select value={p.group_name} onChange={(e) => setGroup(p.id, e.target.value)} aria-label={`Group for ${p.nickname}`}>
+                    <option value="experimental">experimental</option><option value="control">control</option>
+                  </select>
+                  <div className="muted small">{p.group_source}</div>
+                </td>
+                <td className="small muted">{p.created_at}</td>
+                <td className="num">{p.sessions}</td><td className="num">{p.total_score}</td>
+                <td className="num">{fmt(p.accuracy, '%')}</td><td className="num">{fmt(p.pre_score, '%')}</td><td className="num">{fmt(p.post_score, '%')}</td><td className="num">{fmt(p.retention_score, '%')}</td>
                 <td className={`num ${p.post_score - p.pre_score > 0 ? 'good' : ''}`}>{p.pre_score != null && p.post_score != null ? `${p.post_score - p.pre_score > 0 ? '+' : ''}${Math.round(p.post_score - p.pre_score)}` : '-'}</td>
               </tr>
             ))}
           </tbody>
         </table>
+      </div>
+    </div>
+  );
+}
+
+const pFmt = (p) => (p == null ? '= -' : p < 0.001 ? '< .001' : `= ${p.toFixed(3).replace(/^0/, '')}`);
+const testLine = (t, kind) => {
+  if (!t || t.insufficient) return <span className="muted">not enough data</span>;
+  if (kind === 't') return <>t({t.df}) = {t.t ?? '-'}, p {pFmt(t.p)}{t.cohensD != null && <>, d = {t.cohensD}</>}</>;
+  if (kind === 'w') return <>W+ = {t.wPlus}, z = {t.z ?? '-'}, p {pFmt(t.p)}{t.r != null && <>, r = {t.r}</>}</>;
+  if (kind === 'welch') return <>t({t.df == null ? '-' : Math.round(t.df * 10) / 10}) = {t.t ?? '-'}, p {pFmt(t.p)}</>;
+  return <>U = {t.U}, z = {t.z ?? '-'}, p {pFmt(t.p)}</>;
+};
+
+function GroupComparison({ s }) {
+  const g = s.groups;
+  const row = (label, k) => (
+    <tr><td>{label}</td>{['experimental', 'control'].map((n) => <td key={n} className="num">{g[n][k].n ? `${fmt(g[n][k].mean, '%')} (SD ${fmt(g[n][k].sd)}, n=${g[n][k].n})` : '-'}</td>)}</tr>
+  );
+  return (
+    <div className="card">
+      <h3>Experimental vs control group</h3>
+      <p className="muted small">Means of first attempts. Control = wait-list group that does the neutral reading task instead of the game (they play after the retention check).</p>
+      <div className="table-wrap">
+        <table className="table">
+          <thead><tr><th></th><th className="num">Experimental (game)</th><th className="num">Control (reading)</th></tr></thead>
+          <tbody>
+            <tr><td>Players</td><td className="num">{g.experimental.players}</td><td className="num">{g.control.players}</td></tr>
+            {row('Pre-quiz', 'pre')}{row('Post-quiz', 'post')}{row('Retention', 'retention')}
+            <tr><td>Paired gain (post − pre)</td>{['experimental', 'control'].map((n) => <td key={n} className="num">{g[n].improvementPoints == null ? '-' : `${g[n].improvementPoints > 0 ? '+' : ''}${g[n].improvementPoints} pts (${g[n].improvementPercent ?? '-'}%)`}</td>)}</tr>
+            <tr><td>Paired t-test (pre vs post)</td>{['experimental', 'control'].map((n) => <td key={n} className="num small">{testLine(g[n].tTest, 't')}</td>)}</tr>
+            <tr><td>Wilcoxon signed-rank</td>{['experimental', 'control'].map((n) => <td key={n} className="num small">{testLine(g[n].wilcoxon, 'w')}</td>)}</tr>
+            <tr><td>Retention vs post (t-test)</td>{['experimental', 'control'].map((n) => <td key={n} className="num small">{testLine(g[n].retentionTTest, 't')}</td>)}</tr>
+          </tbody>
+        </table>
+      </div>
+      <p className="small">Between groups (gain): Welch {testLine(s.between.gainWelch, 'welch')} · Mann-Whitney {testLine(s.between.gainMannWhitney, 'u')}</p>
+    </div>
+  );
+}
+
+function ConfidenceCard({ c }) {
+  const kinds = ['pre', 'post', 'retention'].filter((k) => c.byKind[k]);
+  return (
+    <div className="card">
+      <h3>Confidence calibration</h3>
+      <p className="muted small">"Confidently wrong" = a wrong quiz answer rated 4 or 5 (sure / very sure).</p>
+      {!kinds.length ? <p className="muted small">No rated answers yet.</p> : (
+        <table className="table">
+          <thead><tr><th>Quiz</th><th className="num">Answers</th><th className="num">Confidently wrong</th><th className="num">% of errors</th><th className="num">Avg conf. right / wrong</th></tr></thead>
+          <tbody>{kinds.map((k) => { const b = c.byKind[k]; return (
+            <tr key={k}><td>{k}</td><td className="num">{b.answers}</td><td className="num">{b.confidentlyWrong} ({fmt(b.confidentlyWrongRate, '%')})</td><td className="num">{fmt(b.confidentlyWrongShareOfErrors, '%')}</td><td className="num">{fmt(b.avgConfidenceCorrect)} / {fmt(b.avgConfidenceWrong)}</td></tr>
+          ); })}</tbody>
+        </table>
+      )}
+    </div>
+  );
+}
+
+function SurveyCard({ v }) {
+  return (
+    <div className="card">
+      <h3>Usability & quality surveys</h3>
+      <p>SUS: <b>{v.sus.n ? `${v.sus.mean} / 100` : '-'}</b> {v.sus.grade && <span className="pill">{v.sus.grade.adjective} · {v.sus.grade.acceptability}</span>} <span className="muted small">n={v.sus.n}{v.sus.sd != null && `, SD ${v.sus.sd}`}</span></p>
+      <p>ISO/IEC 25010 overall: <b>{v.iso25010.overallMean ?? '-'}</b> {v.iso25010.overallInterpretation && <span className="pill">{v.iso25010.overallInterpretation}</span>} <span className="muted small">n={v.iso25010.n}</span></p>
+      {v.iso25010.n > 0 && (
+        <table className="table">
+          <thead><tr><th>Characteristic</th><th className="num">Mean</th><th>Interpretation</th></tr></thead>
+          <tbody>{v.iso25010.characteristics.map((c) => <tr key={c.characteristic}><td>{c.characteristic}</td><td className="num">{c.mean ?? '-'}</td><td>{c.interpretation || '-'}</td></tr>)}</tbody>
+        </table>
+      )}
+    </div>
+  );
+}
+
+function StudyAdmin({ token, me }) {
+  const isSuper = me?.role === 'superadmin';
+  const [settings, setSettings] = useState(null);
+  const [admins, setAdmins] = useState([]);
+  const [msg, setMsg] = useState('');
+  const [err, setErr] = useState('');
+  const [form, setForm] = useState({ username: '', displayName: '', password: '', role: 'educator' });
+  const [pw, setPw] = useState({ currentPassword: '', newPassword: '' });
+  const load = async () => {
+    try {
+      setSettings(await api.admin.settings(token));
+      if (isSuper) setAdmins(await api.admin.admins(token));
+    } catch (e) { setErr(e.message); }
+  };
+  useEffect(() => { load(); }, []); // eslint-disable-line
+  const run = async (fn, ok) => { setErr(''); setMsg(''); try { await fn(); setMsg(ok); load(); } catch (e) { setErr(e.message); } };
+  if (!settings) return <div className="loading">Loading…</div>;
+  return (
+    <div className="overview">
+      {msg && <p className="good">{msg}</p>}{err && <p className="error">{err}</p>}
+      <div className="card">
+        <h3>Study settings</h3>
+        <div className="form-row">
+          <label>Control-group ratio (0-1)<input type="number" step="0.05" min="0" max="1" value={settings.controlRatio} disabled={!isSuper} onChange={(e) => setSettings({ ...settings, controlRatio: e.target.value })} /></label>
+          <label>Retention delay (days)<input type="number" min="0" max="365" value={settings.retentionDays} disabled={!isSuper} onChange={(e) => setSettings({ ...settings, retentionDays: e.target.value })} /></label>
+          <label>Rounds before post-quiz<input type="number" min="1" max="20" value={settings.minRoundsForPost} disabled={!isSuper} onChange={(e) => setSettings({ ...settings, minRoundsForPost: e.target.value })} /></label>
+          {isSuper && <button className="btn btn-gold" onClick={() => run(() => api.admin.saveSettings(token, settings), 'Settings saved')}>Save</button>}
+        </div>
+        <p className="muted small">New players are randomly assigned: control with probability = ratio (0.5 = half). {isSuper ? '' : 'Only a superadmin can change these.'}</p>
+      </div>
+      {isSuper && (
+        <div className="card">
+          <h3>Admin accounts</h3>
+          <table className="table">
+            <thead><tr><th>Username</th><th>Name</th><th>Role</th><th>Last login</th><th></th></tr></thead>
+            <tbody>{admins.map((a) => (
+              <tr key={a.id}>
+                <td><b>{a.username}</b></td><td>{a.display_name || '-'}</td>
+                <td><select value={a.role} onChange={(e) => run(() => api.admin.updateAdmin(token, a.id, { role: e.target.value }), 'Role updated')}><option value="educator">educator</option><option value="superadmin">superadmin</option></select></td>
+                <td className="small muted">{a.last_login_at || 'never'}</td>
+                <td>{a.id !== me.id && <button className="btn btn-sm btn-danger" onClick={() => window.confirm(`Delete ${a.username}?`) && run(() => api.admin.deleteAdmin(token, a.id), 'Account deleted')}>Delete</button>}</td>
+              </tr>
+            ))}</tbody>
+          </table>
+          <h4>Add an account</h4>
+          <div className="form-row">
+            <label>Username<input value={form.username} onChange={(e) => setForm({ ...form, username: e.target.value })} /></label>
+            <label>Display name<input value={form.displayName} onChange={(e) => setForm({ ...form, displayName: e.target.value })} /></label>
+            <label>Initial password<input type="password" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} autoComplete="new-password" /></label>
+            <label>Role<select value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value })}><option value="educator">educator</option><option value="superadmin">superadmin</option></select></label>
+            <button className="btn btn-gold" onClick={() => run(async () => { await api.admin.createAdmin(token, form); setForm({ username: '', displayName: '', password: '', role: 'educator' }); }, 'Account created')}>Add</button>
+          </div>
+          <p className="muted small">Passwords: at least 10 characters with letters and numbers. Share them privately; the user should change it after first sign-in.</p>
+        </div>
+      )}
+      <div className="card">
+        <h3>Change my password</h3>
+        <div className="form-row">
+          <label>Current password<input type="password" value={pw.currentPassword} onChange={(e) => setPw({ ...pw, currentPassword: e.target.value })} autoComplete="current-password" /></label>
+          <label>New password<input type="password" value={pw.newPassword} onChange={(e) => setPw({ ...pw, newPassword: e.target.value })} autoComplete="new-password" /></label>
+          <button className="btn btn-gold" onClick={() => run(async () => { await api.admin.changePassword(token, pw.currentPassword, pw.newPassword); setPw({ currentPassword: '', newPassword: '' }); }, 'Password changed')}>Update</button>
+        </div>
       </div>
     </div>
   );

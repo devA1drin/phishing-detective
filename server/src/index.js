@@ -9,6 +9,8 @@ import playersRouter from './routes/players.js';
 import gameRouter from './routes/game.js';
 import quizRouter from './routes/quiz.js';
 import adminRouter from './routes/admin.js';
+import surveysRouter from './routes/surveys.js';
+import { generalLimiter } from './lib/ratelimit.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -16,11 +18,14 @@ export async function createApp() {
   const repo = await getRepo();
   const app = express();
   app.disable('x-powered-by');
+  app.set('trust proxy', 1); // Vercel / reverse proxy: use the client IP for rate limiting
   app.use(cors());
   app.use(express.json({ limit: '200kb' }));
 
   app.get('/api/health', async (_req, res) => res.json({ ok: true, db: repo.driver, scenarios: await repo.countScenarios() }));
+  app.use('/api', generalLimiter);
   app.use('/api', playersRouter(repo));
+  app.use('/api', surveysRouter(repo));
   app.use('/api', gameRouter(repo));
   app.use('/api', quizRouter(repo));
   app.use('/api', adminRouter(repo));

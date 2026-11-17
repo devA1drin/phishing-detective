@@ -17,6 +17,60 @@ export default function Hub() {
   if (!progress) return <div className="loading">Loading case board…</div>;
   if (!progress.preQuiz) return <Navigate to="/quiz/pre" replace />;
   const p = progress;
+  const fmtDate = (iso) => new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+
+  const retentionCard = (
+    <div className="card">
+      <h3>⏳ Retention check</h3>
+      {p.retentionQuiz.taken ? (
+        <p>Retention score: <b>{p.retentionQuiz.taken.percent}%</b> (post: {p.postQuiz?.percent}%, pre: {p.preQuiz.percent}%). Thank you!</p>
+      ) : p.retentionQuiz.unlocked ? (
+        <><p className="muted">It's been {p.settings.retentionDays} days. Let's see how much you remember: 10 new messages.</p><Link className="btn btn-gold" to="/quiz/retention">Take retention check</Link></>
+      ) : p.retentionQuiz.unlocksAt ? (
+        <p className="muted">🔒 Opens on <b>{fmtDate(p.retentionQuiz.unlocksAt)}</b> ({p.settings.retentionDays} days after your post-quiz). Come back then!</p>
+      ) : (
+        <p className="muted">🔒 Opens {p.settings.retentionDays} days after your post-game quiz.</p>
+      )}
+    </div>
+  );
+  const surveyCard = p.surveys.unlocked && (
+    <div className="card">
+      <h3>🗳️ Rate the game</h3>
+      {p.surveys.sus && p.surveys.iso25010 ? <p className="good">✔ Both surveys submitted. Salamat!</p> : (
+        <><p className="muted">Two short surveys (about 3 minutes) on how usable and well-built the game is. Your feedback is part of the study.</p><Link className="btn btn-gold" to="/surveys">Answer surveys</Link></>
+      )}
+    </div>
+  );
+
+  // Control (wait-list) group: reading task → post-quiz → retention → then the game opens
+  if (!p.canPlay) {
+    return (
+      <div className="hub">
+        <section className="hub-head card">
+          <div>
+            <span className="eyebrow">Study group: reading first</span>
+            <h1>Welcome, Detective {p.player.nickname}</h1>
+            <p className="muted">You were randomly placed in the group that reads a short guide first. The game unlocks for you after your retention check, so you still get to play!</p>
+          </div>
+          <div className="stat-row">
+            <div className="stat"><b>{p.preQuiz.percent}%</b><span>Pre-quiz</span></div>
+            <div className="stat"><b>{p.postQuiz ? `${p.postQuiz.percent}%` : '-'}</b><span>Post-quiz</span></div>
+          </div>
+        </section>
+        <section className="hub-grid">
+          <div className="card">
+            <h3>📖 Step 1: Reading task</h3>
+            {p.reading.done ? <p className="good">✔ Done. Thank you!</p> : <><p className="muted">Read a short guide about online safety (about 5 minutes).</p><Link className="btn btn-gold" to="/reading">Start reading</Link></>}
+          </div>
+          <div className="card">
+            <h3>📋 Step 2: Post-quiz</h3>
+            {p.postQuiz ? <p>Your score: <b>{p.postQuiz.percent}%</b></p> : p.postQuizUnlocked ? <Link className="btn btn-gold" to="/quiz/post">Take post-quiz</Link> : <p className="muted">🔒 Finish the reading task first.</p>}
+          </div>
+          {retentionCard}
+        </section>
+      </div>
+    );
+  }
 
   return (
     <div className="hub">
@@ -75,9 +129,11 @@ export default function Hub() {
               <Link className="btn btn-gold" to="/quiz/post">Take post-game quiz</Link>
             </>
           ) : (
-            <p className="muted">🔒 Finish at least one round to unlock. (Tip: play a few rounds first for the best results.)</p>
+            <p className="muted">🔒 Finish {p.settings.minRoundsForPost > 1 ? `${p.settings.minRoundsForPost} rounds` : 'at least one round'} to unlock. (Tip: play a few rounds first for the best results.)</p>
           )}
         </div>
+        {p.postQuiz && retentionCard}
+        {surveyCard}
         <div className="card">
           <h3>🏆 Top detectives</h3>
           {board.length === 0 ? <p className="muted">No finished rounds yet. Be the first!</p> : (

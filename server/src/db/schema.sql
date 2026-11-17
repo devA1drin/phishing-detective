@@ -2,7 +2,7 @@
 CREATE TABLE IF NOT EXISTS players (
   id          INTEGER PRIMARY KEY AUTOINCREMENT,
   nickname    TEXT NOT NULL UNIQUE COLLATE NOCASE,
-  created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+  created_at  TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP)
 );
 
 CREATE TABLE IF NOT EXISTS scenarios (
@@ -21,8 +21,8 @@ CREATE TABLE IF NOT EXISTS scenarios (
   safe_signs      TEXT NOT NULL DEFAULT '[]',   -- JSON [string]
   explanation     TEXT NOT NULL DEFAULT '',
   active          INTEGER NOT NULL DEFAULT 1,
-  created_at      TEXT NOT NULL DEFAULT (datetime('now')),
-  updated_at      TEXT NOT NULL DEFAULT (datetime('now'))
+  created_at      TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP),
+  updated_at      TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP)
 );
 
 CREATE TABLE IF NOT EXISTS game_sessions (
@@ -35,7 +35,7 @@ CREATE TABLE IF NOT EXISTS game_sessions (
   answered        INTEGER NOT NULL DEFAULT 0,
   current_streak  INTEGER NOT NULL DEFAULT 0,
   max_streak      INTEGER NOT NULL DEFAULT 0,
-  started_at      TEXT NOT NULL DEFAULT (datetime('now')),
+  started_at      TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP),
   finished_at     TEXT
 );
 
@@ -49,7 +49,7 @@ CREATE TABLE IF NOT EXISTS answers (
   flags_found     INTEGER NOT NULL DEFAULT 0,
   false_clicks    INTEGER NOT NULL DEFAULT 0,
   points          INTEGER NOT NULL DEFAULT 0,
-  created_at      TEXT NOT NULL DEFAULT (datetime('now')),
+  created_at      TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP),
   UNIQUE (session_id, scenario_id)
 );
 
@@ -60,7 +60,7 @@ CREATE TABLE IF NOT EXISTS quiz_attempts (
   score           INTEGER NOT NULL,
   total           INTEGER NOT NULL,
   answers         TEXT NOT NULL,                -- JSON [{itemId, choice, correct}]
-  created_at      TEXT NOT NULL DEFAULT (datetime('now'))
+  created_at      TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP)
 );
 
 CREATE INDEX IF NOT EXISTS idx_sessions_player ON game_sessions(player_id);
