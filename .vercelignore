@@ -1,0 +1,10 @@
+node_modules
+client/dist
+server/data
+server/.env
+.env
+*.log
+screenshots
+scripts/screenshots.py
+.env.local
+.vercel

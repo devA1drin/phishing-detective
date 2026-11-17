@@ -1,0 +1,26 @@
+{
+  "name": "phishing-detective",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Phishing Detective: Interactive Web Game for Cybersecurity Awareness (Capstone MVP)",
+  "workspaces": [
+    "client",
+    "server"
+  ],
+  "scripts": {
+    "dev": "concurrently -k -n server,client -c blue,magenta \"npm run dev -w server\" \"npm run dev -w client\"",
+    "build": "npm run build -w client",
+    "start": "npm start -w server",
+    "seed": "npm run seed -w server",
+    "test": "npm test -w server",
+    "demo": "node scripts/demo-data.mjs",
+    "test:api": "bash scripts/api-smoke.sh"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.0"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "type": "module"
+}

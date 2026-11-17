@@ -1,0 +1,21 @@
+# dependencies & builds
+node_modules/
+client/dist/
+
+# local data
+server/data/*.db
+server/data/*.db-*
+*.db
+
+# secrets / env
+.env
+.env.*
+!.env.example
+server/.env
+
+# vercel
+.vercel/
+
+# misc
+*.log
+.DS_Store
