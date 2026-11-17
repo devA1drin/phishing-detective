@@ -9,6 +9,8 @@ import { toCsv } from '../lib/csv.js';
 import { segmentBody, flagPartKeys } from '../lib/game.js';
 import { groupComparison, confidenceStats, surveyStats, firstScores } from '../lib/analytics.js';
 import { DEFAULT_SETTINGS } from '../db/repo.js';
+import { adminScope, ScopeError } from '../lib/scope.js';
+import { scopedData, buildStats, scenarioStatsFrom, studentReport, sectionRows, renderChapter4Pdf } from '../lib/reports.js';
 
 const round1 = (v) => (v == null ? null : Math.round(v * 10) / 10);
 const USER_RE = /^[A-Za-z0-9_.-]{3,32}$/;
@@ -110,8 +112,20 @@ export default function adminRouter(repo) {
   });
 
   // ── players ──
-  r.get('/admin/players', async (_req, res) => res.json(await repo.listPlayersWithStats()));
+  const scopeOf = (req) => adminScope(repo, req.admin, req.query.section);
+  const canSee = async (req, playerId) => (await adminScope(repo, req.admin)).has(playerId);
+
+  r.get('/admin/players', async (req, res) => {
+    const scope = await scopeOf(req);
+    res.json((await repo.listPlayersWithStats()).filter((p) => scope.has(p.id)));
+  });
+  r.get('/admin/players/:id/report', async (req, res) => {
+    if (!(await canSee(req, req.params.id))) return res.status(404).json({ error: 'Student not found in your classes' });
+    const rep = await studentReport(repo, Number(req.params.id));
+    rep ? res.json(rep) : res.status(404).json({ error: 'Not found' });
+  });
   r.put('/admin/players/:id/group', async (req, res) => {
+    if (!(await canSee(req, req.params.id))) return res.status(404).json({ error: 'Student not found in your classes' });
     const group = req.body?.group;
     if (!['control', 'experimental'].includes(group)) return res.status(400).json({ error: 'group must be control or experimental' });
     const p = await repo.setPlayerGroup(Number(req.params.id), group, 'admin');
@@ -123,56 +137,47 @@ export default function adminRouter(repo) {
     (await repo.deletePlayer(Number(req.params.id))) ? res.status(204).end() : res.status(404).json({ error: 'Not found' });
   });
 
-  r.get('/admin/stats', async (_req, res) => {
-    const t = await repo.answerTotals();
-    const players = await repo.listPlayersWithStats();
-    const attempts = await repo.listQuizAttempts();
-    const { groups, between } = groupComparison(players, attempts);
-    const scores = Object.values(firstScores(attempts));
-    const paired = scores.filter((s) => s.pre != null && s.post != null);
-    const avg = (a) => (a.length ? a.reduce((x, y) => x + y, 0) / a.length : null);
-    const pPre = avg(paired.map((s) => s.pre)), pPost = avg(paired.map((s) => s.post));
-    const exp = groups.experimental;
-    res.json({
-      players: t.players, sessions: t.sessions, startedSessions: t.started, answers: t.answers,
-      accuracy: t.answers ? round1((100 * t.correct) / t.answers) : null, avgTimeSec: t.avgTimeMs ? round1(t.avgTimeMs / 1000) : null,
-      quiz: {
-        preCount: scores.filter((s) => s.pre != null).length, postCount: scores.filter((s) => s.post != null).length,
-        retentionCount: scores.filter((s) => s.retention != null).length,
-        avgPre: round1(avg(scores.filter((s) => s.pre != null).map((s) => s.pre))), avgPost: round1(avg(scores.filter((s) => s.post != null).map((s) => s.post))),
-        avgRetention: round1(avg(scores.filter((s) => s.retention != null).map((s) => s.retention))),
-        pairedCount: paired.length, pairedAvgPre: round1(pPre), pairedAvgPost: round1(pPost),
-        // Headline impact = experimental group (players who actually played)
-        improvementPoints: exp.improvementPoints, improvementPercent: exp.improvementPercent,
-        targetMet: exp.improvementPercent != null ? exp.improvementPercent >= 20 : null,
-        playersImprovedBy20: exp.improvedBy20, experimentalPairedCount: exp.pairedCount,
-      },
-      groups, between,
-      confidence: confidenceStats(attempts),
-      surveys: surveyStats(await repo.listSurveys()),
-      settings: await repo.getSettings(),
-      pendingScenarios: await repo.countPendingScenarios(),
-      byLevel: t.byLevel, byChannel: t.byChannel,
-    });
+  r.get('/admin/stats', async (req, res) => {
+    const d = await scopedData(repo, await scopeOf(req));
+    res.json(buildStats(d, { settings: await repo.getSettings(), pendingScenarios: await repo.countPendingScenarios() }));
   });
 
-  r.get('/admin/sessions', async (_req, res) => {
-    const rows = await repo.listSessions();
+  r.get('/admin/sessions', async (req, res) => {
+    const scope = await scopeOf(req);
+    const rows = (await repo.listSessions()).filter((x) => scope.has(x.playerId));
     res.json(rows.map(({ scenarioIds, ...s }) => ({ ...s, total: scenarioIds.length, accuracy: s.answered ? Math.round((100 * s.correct) / s.answered) : null })));
   });
-  r.get('/admin/scenario-stats', async (_req, res) => res.json(await repo.scenarioStats()));
+  r.get('/admin/scenario-stats', async (req, res) => {
+    const scope = await scopeOf(req);
+    if (scope.all) return res.json(await repo.scenarioStats());
+    res.json(scenarioStatsFrom(await repo.scenarioStats(), (await scopedData(repo, scope)).answers));
+  });
+
+  // ── Chapter 4 results (JSON + PDF), computed server-side for the admin's scope ──
+  r.get('/admin/reports/chapter4', async (req, res) => res.json(buildStats(await scopedData(repo, await scopeOf(req)))));
+  r.get('/admin/reports/chapter4.pdf', async (req, res) => {
+    const stats = buildStats(await scopedData(repo, await scopeOf(req)));
+    const generatedAt = new Date().toLocaleString('en-PH', { timeZone: 'Asia/Manila', dateStyle: 'medium', timeStyle: 'short' });
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="phishing-detective-chapter4${req.query.section ? `-section-${Number(req.query.section)}` : ''}.pdf"`);
+    renderChapter4Pdf(stats, { generatedAt, generatedBy: req.admin.username }, res);
+  });
 
   // CSV export
   r.get('/admin/export/:kind', async (req, res) => {
     const kind = req.params.kind.replace(/\.csv$/, '');
+    const scope = await scopeOf(req);
+    const d = await scopedData(repo, scope);
     let rows;
-    if (kind === 'players') rows = await repo.listPlayersWithStats();
-    else if (kind === 'sessions') rows = (await repo.listSessions()).map(({ scenarioIds, ...s }) => ({ ...s, scenarioIds: scenarioIds.join(' ') }));
-    else if (kind === 'answers') rows = await repo.listAnswersExport();
-    else if (kind === 'quiz') rows = (await repo.listQuizAttempts()).map(({ answers, ...a }) => ({ ...a, percent: round1((100 * a.score) / a.total), confidently_wrong: (answers || []).filter((x) => !x.correct && x.confidence >= 4).length, answers }));
-    else if (kind === 'quiz-items') rows = (await repo.listQuizAttempts()).flatMap((a) => (a.answers || []).map((x) => ({ attempt_id: a.id, nickname: a.nickname, group_name: a.group_name, kind: a.kind, item_id: x.itemId, choice: x.choice, confidence: x.confidence, correct: x.correct, confidently_wrong: !x.correct && x.confidence >= 4, created_at: a.created_at })));
-    else if (kind === 'surveys') rows = (await repo.listSurveys()).map(({ answers, ...s }) => ({ ...s, ...(Array.isArray(answers) ? Object.fromEntries(answers.map((v, i) => [`sus_q${i + 1}`, v])) : answers) }));
-    else if (kind === 'scenarios') rows = await repo.scenarioStats();
+    if (kind === 'players') rows = d.players;
+    else if (kind === 'sessions') rows = d.sessions.map(({ scenarioIds, ...s }) => ({ ...s, scenarioIds: scenarioIds.join(' ') }));
+    else if (kind === 'answers') rows = d.answers;
+    else if (kind === 'quiz') rows = d.attempts.map(({ answers, ...a }) => ({ ...a, percent: round1((100 * a.score) / a.total), confidently_wrong: (answers || []).filter((x) => !x.correct && x.confidence >= 4).length, answers }));
+    else if (kind === 'quiz-items') rows = d.attempts.flatMap((a) => (a.answers || []).map((x) => ({ attempt_id: a.id, nickname: a.nickname, group_name: a.group_name, kind: a.kind, item_id: x.itemId, choice: x.choice, confidence: x.confidence, correct: x.correct, confidently_wrong: !x.correct && x.confidence >= 4, created_at: a.created_at })));
+    else if (kind === 'surveys') rows = d.surveys.map(({ answers, ...s }) => ({ ...s, ...(Array.isArray(answers) ? Object.fromEntries(answers.map((v, i) => [`sus_q${i + 1}`, v])) : answers) }));
+    else if (kind === 'scenarios') rows = scope.all ? await repo.scenarioStats() : scenarioStatsFrom(await repo.scenarioStats(), d.answers);
+    else if (kind === 'students') rows = sectionRows(d);
+    else if (kind === 'categories') rows = d.categories.map((c) => ({ ...c, miss_rate: c.seen ? round1((100 * c.missed) / c.seen) : null }));
     else return res.status(404).json({ error: 'Unknown export' });
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
     res.setHeader('Content-Disposition', `attachment; filename="phishing-detective-${kind}.csv"`);
@@ -242,7 +247,13 @@ export default function adminRouter(repo) {
   // ── class sections (join codes) ──
   const JOIN_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
   const joinCode = () => [...crypto.randomBytes(6)].map((b) => JOIN_ALPHABET[b % JOIN_ALPHABET.length]).join('');
-  r.get('/admin/sections', async (_req, res) => res.json(await repo.listSections()));
+  r.get('/admin/sections', async (req, res) => res.json((await adminScope(repo, req.admin)).sections));
+  r.get('/admin/sections/:id/report', async (req, res) => {
+    const scope = await adminScope(repo, req.admin, req.params.id);
+    const d = await scopedData(repo, scope);
+    const stats = buildStats(d);
+    res.json({ section: scope.chosen[0], students: sectionRows(d), categories: stats.categories, quiz: stats.quiz, groups: stats.groups, accuracy: stats.accuracy, rounds: stats.sessions });
+  });
   r.post('/admin/sections', async (req, res) => {
     const name = String(req.body?.name || '').trim();
     if (name.length < 2 || name.length > 60) return res.status(400).json({ error: 'Section name must be 2-60 characters.' });

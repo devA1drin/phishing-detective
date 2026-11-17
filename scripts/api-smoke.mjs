@@ -86,6 +86,17 @@ try {
   const pdfBuf = Buffer.from(await pdf.arrayBuffer());
   if (pdf.status !== 200 || pdfBuf.subarray(0, 5).toString() !== '%PDF-') throw new Error(`certificate PDF failed: HTTP ${pdf.status}`);
   ok('certificate PDF', `${Math.round(pdfBuf.length / 1024)} KB`);
+  // Phase 5: educator reports and Chapter 4 statistics (scoped to the smoke section)
+  const rep = await call('GET', `/admin/players/${playerId}/report`, null, admin);
+  ok('student report', `pre ${rep.quiz.pre}% post ${rep.quiz.post}%, weak: ${rep.weak.map((w) => w.label).join(', ') || 'n/a'}`);
+  const srep = await call('GET', `/admin/sections/${sec.id}/report`, null, admin);
+  ok('section report', `${srep.students.length} student(s), ${srep.categories.length} categories`);
+  const c4 = await call('GET', `/admin/reports/chapter4?section=${sec.id}`, null, admin);
+  ok('chapter 4 stats', `scope "${c4.scope.label}", paired n=${c4.groups.experimental.pairedCount}`);
+  const c4pdf = await fetch(`${BASE}/admin/reports/chapter4.pdf?section=${sec.id}`, { headers: { authorization: `Bearer ${admin}` } });
+  const c4buf = Buffer.from(await c4pdf.arrayBuffer());
+  if (c4pdf.status !== 200 || c4buf.subarray(0, 5).toString() !== '%PDF-') throw new Error(`chapter 4 PDF failed: HTTP ${c4pdf.status}`);
+  ok('chapter 4 PDF', `${Math.round(c4buf.length / 1024)} KB`);
   const ai = await call('GET', '/admin/ai/status', null, admin);
   ok('AI status', ai.enabled ? `enabled, ${ai.model} via ${ai.auth}` : `disabled: ${ai.reason}`);
   if (ai.enabled && process.env.SMOKE_AI_GENERATE === '1') {

@@ -124,6 +124,14 @@ export const sqliteMigrations = [
         issued_at TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP), updated_at TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP))`);
     },
   },
+  {
+    id: '0006_phase5_educator_tools',
+    up(db) {
+      db.exec('CREATE INDEX IF NOT EXISTS idx_sections_owner ON sections(owner_admin_id)');
+      db.exec('CREATE INDEX IF NOT EXISTS idx_game_sessions_player ON game_sessions(player_id)');
+      db.exec('CREATE INDEX IF NOT EXISTS idx_quiz_attempts_player ON quiz_attempts(player_id)');
+    },
+  },
 ];
 
 export function migrateSqlite(db) {

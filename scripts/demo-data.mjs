@@ -1,6 +1,6 @@
 // Simulates demo players through the real API so the admin dashboard has data to show.
 // Players are named demo_studentNN (PIN 1234) and randomly assigned to groups like real players.
-// Usage: node scripts/demo-data.mjs [baseUrl] [players]
+// Usage: node scripts/demo-data.mjs [baseUrl] [players]   (DEMO_SECTION_CODES=AAA111,BBB222 spreads them over class sections)
 const BASE = (process.argv[2] || 'http://localhost:3000') + '/api';
 const N = Number(process.argv[3] || 12);
 const { scenarios } = await import('../server/src/data/scenarios.js');
@@ -10,6 +10,7 @@ const { ISO_ITEMS } = await import('../server/src/data/surveys.js');
 let token = null;
 const req = (m, p, b) => fetch(BASE + p, { method: m, headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) }, body: b ? JSON.stringify(b) : undefined }).then((r) => r.json().catch(() => ({})));
 const rnd = (a, b) => a + Math.random() * (b - a);
+const CODES = (process.env.DEMO_SECTION_CODES || '').split(',').filter(Boolean);
 const L = () => Math.max(1, Math.min(5, Math.round(rnd(3, 5.4))));
 
 for (let i = 1; i <= N; i++) {
@@ -19,6 +20,7 @@ for (let i = 1; i <= N; i++) {
   if (auth.error) auth = await req('POST', '/players/login', { nickname, pin: '1234' });
   if (!auth.token) { console.log(nickname, 'skipped:', auth.error); continue; }
   token = auth.token;
+  if (CODES.length) await req('POST', '/players/me/section', { code: CODES[i % CODES.length] });
   let skill = rnd(0.45, 0.7);
   const quiz = async (kind) => {
     const { items } = await req('GET', `/quiz/${kind}`);

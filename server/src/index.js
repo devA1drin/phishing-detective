@@ -1,4 +1,5 @@
 import 'dotenv/config';
+import 'express-async-errors'; // Express 4: route async errors reach the error handler
 import express from 'express';
 import cors from 'cors';
 import fs from 'node:fs';
@@ -44,6 +45,7 @@ export async function createApp() {
 
   // eslint-disable-next-line no-unused-vars
   app.use((err, _req, res, _next) => {
+    if (err?.status >= 400 && err.status < 500) return res.status(err.status).json({ error: err.message });
     console.error(err);
     res.status(500).json({ error: 'Server error' });
   });

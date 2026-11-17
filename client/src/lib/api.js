@@ -20,6 +20,18 @@ async function request(method, url, body, token) {
 // Player calls carry the player's signed token automatically
 const p = (method, url, body) => request(method, url, body, playerToken());
 
+const sq = (sec) => (sec ? `?section=${encodeURIComponent(sec)}` : '');
+async function saveFile(t, url, filename) {
+  const res = await fetch(url, { headers: { Authorization: `Bearer ${t}` } });
+  if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || 'Download failed');
+  const blob = await res.blob();
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = filename;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}
+
 export const api = {
   register: (nickname, pin, consent) => request('POST', '/api/players/register', { nickname, pin, consent }),
   login: (nickname, pin) => request('POST', '/api/players/login', { nickname, pin }),
@@ -47,11 +59,14 @@ export const api = {
     login: (username, password) => request('POST', '/api/admin/login', { username, password }),
     me: (t) => request('GET', '/api/admin/me', undefined, t),
     changePassword: (t, currentPassword, newPassword) => request('PUT', '/api/admin/me/password', { currentPassword, newPassword }, t),
-    stats: (t) => request('GET', '/api/admin/stats', undefined, t),
-    players: (t) => request('GET', '/api/admin/players', undefined, t),
+    stats: (t, sec) => request('GET', `/api/admin/stats${sq(sec)}`, undefined, t),
+    players: (t, sec) => request('GET', `/api/admin/players${sq(sec)}`, undefined, t),
+    playerReport: (t, id) => request('GET', `/api/admin/players/${id}/report`, undefined, t),
+    sectionReport: (t, id) => request('GET', `/api/admin/sections/${id}/report`, undefined, t),
+    deleteSection: (t, id) => request('DELETE', `/api/admin/sections/${id}`, undefined, t),
     setGroup: (t, id, group) => request('PUT', `/api/admin/players/${id}/group`, { group }, t),
-    sessions: (t) => request('GET', '/api/admin/sessions', undefined, t),
-    scenarioStats: (t) => request('GET', '/api/admin/scenario-stats', undefined, t),
+    sessions: (t, sec) => request('GET', `/api/admin/sessions${sq(sec)}`, undefined, t),
+    scenarioStats: (t, sec) => request('GET', `/api/admin/scenario-stats${sq(sec)}`, undefined, t),
     scenarios: (t) => request('GET', '/api/admin/scenarios', undefined, t),
     createScenario: (t, s) => request('POST', '/api/admin/scenarios', s, t),
     updateScenario: (t, id, s) => request('PUT', `/api/admin/scenarios/${id}`, s, t),
@@ -68,15 +83,7 @@ export const api = {
     deleteAdmin: (t, id) => request('DELETE', `/api/admin/admins/${id}`, undefined, t),
     settings: (t) => request('GET', '/api/admin/settings', undefined, t),
     saveSettings: (t, s) => request('PUT', '/api/admin/settings', s, t),
-    async download(t, kind) {
-      const res = await fetch(`/api/admin/export/${kind}.csv`, { headers: { Authorization: `Bearer ${t}` } });
-      if (!res.ok) throw new Error('Export failed');
-      const blob = await res.blob();
-      const a = document.createElement('a');
-      a.href = URL.createObjectURL(blob);
-      a.download = `phishing-detective-${kind}.csv`;
-      a.click();
-      URL.revokeObjectURL(a.href);
-    },
+    download: (t, kind, sec) => saveFile(t, `/api/admin/export/${kind}.csv${sq(sec)}`, `phishing-detective-${kind}${sec ? `-section-${sec}` : ''}.csv`),
+    chapter4Pdf: (t, sec) => saveFile(t, `/api/admin/reports/chapter4.pdf${sq(sec)}`, `phishing-detective-chapter4${sec ? `-section-${sec}` : ''}.pdf`),
   },
 };

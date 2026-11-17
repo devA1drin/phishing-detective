@@ -40,18 +40,23 @@ function Dashboard({ token, onLogout }) {
   const [tab, setTab] = useState('overview');
   const [data, setData] = useState({});
   const [error, setError] = useState('');
+  const [section, setSection] = useState('');
+  const [sections, setSections] = useState([]);
+  const [report, setReport] = useState(null); // student id for the weakness report
 
-  const load = async () => {
+  const load = async (sec = section) => {
     try {
-      const [me, stats, players, sessions, scenarioStats, scenarios] = await Promise.all([
-        api.admin.me(token), api.admin.stats(token), api.admin.players(token), api.admin.sessions(token), api.admin.scenarioStats(token), api.admin.scenarios(token),
+      const [me, stats, players, sessions, scenarioStats, scenarios, secs] = await Promise.all([
+        api.admin.me(token), api.admin.stats(token, sec), api.admin.players(token, sec), api.admin.sessions(token, sec), api.admin.scenarioStats(token, sec), api.admin.scenarios(token), api.admin.sections(token),
       ]);
       setData({ me, stats, players, sessions, scenarioStats, scenarios });
+      setSections(secs);
     } catch (e) {
       if (e.status === 401) onLogout(); else setError(e.message);
     }
   };
   useEffect(() => { load(); }, []); // eslint-disable-line
+  const pickSection = (v) => { setSection(v); load(v); };
 
   const tabs = [['overview', '📊 Overview'], ['scenarios-stats', '🎯 Miss rates'], ['players', '🕵️ Players'], ['sessions', '🎮 Sessions'], ['manage', '🗂 Scenario bank'], ['classes', '🏫 Classes'], ['ai', `🤖 AI drafts${data.stats?.pendingScenarios ? ` (${data.stats.pendingScenarios})` : ''}`], ['study', '⚙️ Study & accounts']];
   return (
@@ -59,8 +64,14 @@ function Dashboard({ token, onLogout }) {
       <div className="admin-head">
         <div><span className="eyebrow">Educator dashboard{data.me ? ` · ${data.me.displayName || data.me.username} (${data.me.role})` : ''}</span><h1>Phishing Detective analytics</h1></div>
         <div className="admin-actions">
-          <ExportMenu token={token} />
-          <button className="btn btn-ghost" onClick={load}>↻ Refresh</button>
+          <label className="small muted scope-pick">Data scope
+            <select value={section} onChange={(e) => pickSection(e.target.value)}>
+              <option value="">{data.me?.role === 'superadmin' ? 'All participants' : 'All my sections'}</option>
+              {sections.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
+            </select>
+          </label>
+          <ExportMenu token={token} section={section} />
+          <button className="btn btn-ghost" onClick={() => load()}>↻ Refresh</button>
           <button className="btn btn-ghost" onClick={onLogout}>Sign out</button>
         </div>
       </div>
@@ -68,30 +79,90 @@ function Dashboard({ token, onLogout }) {
         {tabs.map(([k, l]) => <button key={k} role="tab" aria-selected={tab === k} className={tab === k ? 'active' : ''} onClick={() => setTab(k)}>{l}</button>)}
       </div>
       {error && <p className="error">{error}</p>}
+      {data.me && data.me.role !== 'superadmin' && sections.length === 0 && <p className="card small">👋 You don't have any class sections yet. Create one in <b>🏫 Classes</b> and share its join code; your students' data appears here once they join.</p>}
+      {report && <StudentReport token={token} id={report} onClose={() => setReport(null)} />}
       {!data.stats ? <div className="loading">Loading analytics…</div> : (
         <>
           {tab === 'overview' && <Overview s={data.stats} />}
           {tab === 'scenarios-stats' && <MissRates rows={data.scenarioStats} />}
-          {tab === 'players' && <Players rows={data.players} token={token} reload={load} />}
+          {tab === 'players' && <Players rows={data.players} token={token} reload={load} onReport={setReport} />}
           {tab === 'sessions' && <Sessions rows={data.sessions} />}
           {tab === 'manage' && <ScenarioManager token={token} scenarios={data.scenarios} reload={load} />}
           {tab === 'study' && <StudyAdmin token={token} me={data.me} />}
           {tab === 'ai' && <AiStudio token={token} reload={load} />}
-          {tab === 'classes' && <Classes token={token} me={data.me} />}
+          {tab === 'classes' && <Classes token={token} me={data.me} onReport={setReport} onChange={() => load()} />}
         </>
       )}
     </div>
   );
 }
 
-function ExportMenu({ token }) {
+function ExportMenu({ token, section }) {
   const [msg, setMsg] = useState('');
-  const dl = async (k) => { try { await api.admin.download(token, k); setMsg(''); } catch (e) { setMsg(e.message); } };
+  const [busy, setBusy] = useState(false);
+  const dl = async (k) => { try { await api.admin.download(token, k, section); setMsg(''); } catch (e) { setMsg(e.message); } };
+  const pdf = async () => { setBusy(true); try { await api.admin.chapter4Pdf(token, section); setMsg(''); } catch (e) { setMsg(e.message); } finally { setBusy(false); } };
   return (
     <div className="export">
-      <span className="small muted">Export CSV:</span>
-      {['players', 'sessions', 'answers', 'quiz', 'quiz-items', 'surveys', 'scenarios'].map((k) => <button key={k} className="btn btn-sm" onClick={() => dl(k)}>{k}</button>)}
+      <button className="btn btn-sm btn-gold" disabled={busy} onClick={pdf} title="Summary statistics, pre/post/retention tables, t-test and Wilcoxon for the selected scope">{busy ? 'Building…' : '📄 Chapter 4 PDF'}</button>
+      <span className="small muted">CSV:</span>
+      {['players', 'students', 'sessions', 'answers', 'quiz', 'quiz-items', 'surveys', 'scenarios', 'categories'].map((k) => <button key={k} className="btn btn-sm" onClick={() => dl(k)}>{k}</button>)}
       {msg && <span className="error small">{msg}</span>}
+    </div>
+  );
+}
+
+function CategoryBars({ rows }) {
+  if (!rows?.length) return <p className="muted small">No red-flag data yet.</p>;
+  return rows.map((c) => (
+    <div className="bar-row" key={c.category}>
+      <span>{c.label}<small>{c.missed}/{c.seen} missed{c.missRate != null ? ` · ${c.missRate}%` : ''}</small></span>
+      <div className="bar"><div className="bar-fill miss" style={{ width: `${c.missRate ?? 0}%` }} /></div>
+    </div>
+  ));
+}
+
+function StudentReport({ token, id, onClose }) {
+  const [r, setR] = useState(null);
+  const [err, setErr] = useState('');
+  useEffect(() => { setR(null); api.admin.playerReport(token, id).then(setR).catch((e) => setErr(e.message)); }, [id]); // eslint-disable-line
+  return (
+    <div className="modal-back" onClick={onClose}>
+      <div className="card modal report" onClick={(e) => e.stopPropagation()} role="dialog" aria-label="Student weakness report">
+        <div className="manage-head"><h3>📋 Student weakness report</h3><div className="form-row"><button className="btn btn-sm" onClick={() => window.print()}>🖨 Print</button><button className="btn btn-sm" onClick={onClose}>✕ Close</button></div></div>
+        {err && <p className="error">{err}</p>}
+        {!r ? !err && <p className="muted">Loading…</p> : (
+          <>
+            <p><b className="gold">{r.player.nickname}</b> · {r.player.group} group · {r.player.section?.name || 'no section'}</p>
+            <div className="stat-row">
+              <div className="stat"><b>{fmt(r.quiz.pre, '%')}</b><span>Pre</span></div>
+              <div className="stat"><b>{fmt(r.quiz.post, '%')}</b><span>Post</span></div>
+              <div className="stat"><b>{fmt(r.quiz.retention, '%')}</b><span>Retention</span></div>
+              <div className="stat"><b className={r.quiz.gain > 0 ? 'good' : ''}>{r.quiz.gain == null ? '-' : `${r.quiz.gain > 0 ? '+' : ''}${r.quiz.gain}`}</b><span>Gain</span></div>
+              <div className="stat"><b>{r.game.rounds}</b><span>Rounds</span></div>
+              <div className="stat"><b>{fmt(r.game.accuracy, '%')}</b><span>Accuracy</span></div>
+              <div className="stat"><b>{r.quiz.confidentlyWrong}</b><span>Confidently wrong</span></div>
+              <div className="stat"><b>{r.game.linkClicks}</b><span>Scam links opened</span></div>
+            </div>
+            <div className="report-grid">
+              <div>
+                <h4>Red-flag categories</h4>
+                <CategoryBars rows={r.categories.filter((c) => c.seen > 0)} />
+              </div>
+              <div>
+                <h4>Focus areas &amp; what to teach</h4>
+                {r.weak.length === 0 ? <p className="muted small">Not enough answers yet (needs 2+ per category).</p> : r.weak.map((w) => <p key={w.category} className="small"><b>{w.label}</b> ({Math.round(w.weakness * 100)}% weakness): {w.tip}</p>)}
+                {r.badges.length > 0 && <p className="small muted">Badges: {r.badges.map((b) => b.name).join(', ')}</p>}
+              </div>
+            </div>
+            <h4>Recently missed cases</h4>
+            {r.missed.length === 0 ? <p className="muted small">No misses. 🎉</p> : (
+              <table className="table"><thead><tr><th>Message</th><th>Channel</th><th>Truth</th><th>Their answer</th></tr></thead>
+                <tbody>{r.missed.map((m, i) => <tr key={i}><td>{m.label}</td><td>{m.channel}</td><td><span className={`pill ${m.isPhishing ? 'pill-red' : 'pill-green'}`}>{m.isPhishing ? 'Phishing' : 'Legit'}</span></td><td>{m.linkClicked ? '🎣 opened link' : m.choice || '⏰ timeout'}</td></tr>)}</tbody></table>
+            )}
+          </>
+        )}
+      </div>
     </div>
   );
 }
@@ -185,7 +256,7 @@ function MissRates({ rows }) {
   );
 }
 
-function Players({ rows, token, reload }) {
+function Players({ rows, token, reload, onReport }) {
   const [err, setErr] = useState('');
   const setGroup = async (id, group) => {
     try { await api.admin.setGroup(token, id, group); reload(); } catch (e) { setErr(e.message); }
@@ -197,11 +268,12 @@ function Players({ rows, token, reload }) {
       {err && <p className="error">{err}</p>}
       <div className="table-wrap">
         <table className="table">
-          <thead><tr><th>Nickname / ID</th><th>Group</th><th>Joined</th><th className="num">Rounds</th><th className="num">Score</th><th className="num">Accuracy</th><th className="num">Pre</th><th className="num">Post</th><th className="num">Retention</th><th className="num">Δ</th></tr></thead>
+          <thead><tr><th>Nickname / ID</th><th>Section</th><th>Group</th><th>Joined</th><th className="num">Rounds</th><th className="num">Score</th><th className="num">Accuracy</th><th className="num">Pre</th><th className="num">Post</th><th className="num">Retention</th><th className="num">Δ</th><th /></tr></thead>
           <tbody>
             {rows.map((p) => (
               <tr key={p.id}>
                 <td><b>{p.nickname}</b>{!p.consent_at && <div className="muted small">no consent record (legacy)</div>}</td>
+                <td className="small">{p.section_name || <span className="muted">-</span>}</td>
                 <td>
                   <select value={p.group_name} onChange={(e) => setGroup(p.id, e.target.value)} aria-label={`Group for ${p.nickname}`}>
                     <option value="experimental">experimental</option><option value="control">control</option>
@@ -212,6 +284,7 @@ function Players({ rows, token, reload }) {
                 <td className="num">{p.sessions}</td><td className="num">{p.total_score}</td>
                 <td className="num">{fmt(p.accuracy, '%')}</td><td className="num">{fmt(p.pre_score, '%')}</td><td className="num">{fmt(p.post_score, '%')}</td><td className="num">{fmt(p.retention_score, '%')}</td>
                 <td className={`num ${p.post_score - p.pre_score > 0 ? 'good' : ''}`}>{p.pre_score != null && p.post_score != null ? `${p.post_score - p.pre_score > 0 ? '+' : ''}${Math.round(p.post_score - p.pre_score)}` : '-'}</td>
+                <td><button className="btn btn-sm" onClick={() => onReport(p.id)}>Report</button></td>
               </tr>
             ))}
           </tbody>
@@ -381,7 +454,38 @@ function Sessions({ rows }) {
   );
 }
 
-function Classes({ token, me }) {
+function SectionReport({ token, sec, onReport, onClose }) {
+  const [r, setR] = useState(null);
+  const [err, setErr] = useState('');
+  const [busy, setBusy] = useState(false);
+  useEffect(() => { api.admin.sectionReport(token, sec.id).then(setR).catch((e) => setErr(e.message)); }, [sec.id]); // eslint-disable-line
+  const pdf = async () => { setBusy(true); try { await api.admin.chapter4Pdf(token, sec.id); } catch (e) { setErr(e.message); } finally { setBusy(false); } };
+  return (
+    <div className="card">
+      <div className="manage-head"><h3>📊 {sec.name}: class report</h3><div className="form-row">
+        <button className="btn btn-sm btn-gold" disabled={busy} onClick={pdf}>📄 Chapter 4 PDF (this class)</button>
+        <button className="btn btn-sm" onClick={() => api.admin.download(token, 'students', sec.id)}>Students CSV</button>
+        <button className="btn btn-sm" onClick={onClose}>✕ Close</button></div></div>
+      {err && <p className="error">{err}</p>}
+      {!r ? !err && <p className="muted">Loading…</p> : (
+        <>
+          <p className="small">Students: <b>{r.students.length}</b> · Rounds: <b>{r.rounds}</b> · Accuracy: <b>{fmt(r.accuracy, '%')}</b> · Avg pre → post: <b>{fmt(r.quiz.pairedAvgPre, '%')} → {fmt(r.quiz.pairedAvgPost, '%')}</b> (n = {r.quiz.pairedCount})</p>
+          <div className="report-grid">
+            <div><h4>Class weak spots</h4><CategoryBars rows={r.categories} /></div>
+            <div className="table-wrap">
+              <h4>Students</h4>
+              <table className="table"><thead><tr><th>Student</th><th className="num">Pre</th><th className="num">Post</th><th className="num">Gain</th><th className="num">Acc.</th><th>Weakest area</th><th /></tr></thead>
+                <tbody>{r.students.map((x) => <tr key={x.id}><td><b>{x.nickname}</b><div className="muted small">{x.group}</div></td><td className="num">{fmt(x.pre, '%')}</td><td className="num">{fmt(x.post, '%')}</td><td className={`num ${x.gain > 0 ? 'good' : ''}`}>{x.gain == null ? '-' : x.gain}</td><td className="num">{fmt(x.accuracy, '%')}</td><td className="small">{x.weakest || '-'}</td><td><button className="btn btn-sm" onClick={() => onReport(x.id)}>Report</button></td></tr>)}</tbody></table>
+            </div>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+function Classes({ token, me, onReport, onChange }) {
+  const [open, setOpen] = useState(null);
   const [rows, setRows] = useState(null);
   const [name, setName] = useState('');
   const [err, setErr] = useState('');
@@ -389,7 +493,11 @@ function Classes({ token, me }) {
   useEffect(() => { load(); }, []); // eslint-disable-line
   const create = async (e) => {
     e.preventDefault(); setErr('');
-    try { await api.admin.createSection(token, name); setName(''); load(); } catch (x) { setErr(x.message); }
+    try { await api.admin.createSection(token, name); setName(''); load(); onChange(); } catch (x) { setErr(x.message); }
+  };
+  const remove = async (r) => {
+    if (!confirm(`Delete section "${r.name}"? Students keep their accounts and data; they just leave the section.`)) return;
+    try { await api.admin.deleteSection(token, r.id); setOpen(null); load(); onChange(); } catch (x) { setErr(x.message); }
   };
   return (
     <div className="overview">
@@ -404,12 +512,14 @@ function Classes({ token, me }) {
         {!rows ? <p className="muted">Loading…</p> : rows.length === 0 ? <p className="muted">No sections yet.</p> : (
           <div className="table-wrap">
             <table className="table">
-              <thead><tr><th>Section</th><th>Join code</th><th className="num">Students</th><th>Educator</th><th>Created</th></tr></thead>
-              <tbody>{rows.map((r) => <tr key={r.id}><td><b>{r.name}</b></td><td><code className="cert-code">{r.join_code}</code></td><td className="num">{r.players}</td><td>{r.owner_username || '-'}</td><td className="small">{new Date(r.created_at).toLocaleDateString()}</td></tr>)}</tbody>
+              <thead><tr><th>Section</th><th>Join code</th><th className="num">Students</th><th>Educator</th><th>Created</th><th /></tr></thead>
+              <tbody>{rows.map((r) => <tr key={r.id}><td><b>{r.name}</b></td><td><code className="cert-code">{r.join_code}</code></td><td className="num">{r.players}</td><td>{r.owner_username || '-'}</td><td className="small">{new Date(r.created_at).toLocaleDateString()}</td>
+                <td className="row-actions"><button className="btn btn-sm" onClick={() => setOpen(r)}>Report</button>{(me?.role === 'superadmin' || r.owner_admin_id === me?.id) && <button className="btn btn-sm btn-danger" onClick={() => remove(r)}>Delete</button>}</td></tr>)}</tbody>
             </table>
           </div>
         )}
       </div>
+      {open && <SectionReport key={open.id} token={token} sec={open} onReport={onReport} onClose={() => setOpen(null)} />}
     </div>
   );
 }

@@ -416,3 +416,16 @@ label.checkbox { flex-direction: row; align-items: center; } label.checkbox inpu
 .cert-code { font-size: 1rem; letter-spacing: .06em; color: var(--gold, #f5c84c); }
 .verify { max-width: 760px; margin: 30px auto; padding: 0 16px; }
 .verify-ok { margin-top: 14px; }
+
+/* Phase 5: educator reports */
+.scope-pick { display: flex; flex-direction: column; gap: 2px; }
+.modal-back { position: fixed; inset: 0; background: rgba(4,8,18,.72); z-index: 50; display: flex; align-items: flex-start; justify-content: center; padding: 40px 16px; overflow-y: auto; }
+.modal { width: min(980px, 100%); }
+.report-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.3fr); gap: 18px; margin: 12px 0; }
+@media (max-width: 860px) { .report-grid { grid-template-columns: minmax(0, 1fr); } }
+@media print {
+  body * { visibility: hidden; }
+  .modal, .modal * { visibility: visible; color: #000 !important; }
+  .modal { position: absolute; left: 0; top: 0; width: 100%; background: #fff !important; box-shadow: none; border: none; }
+  .modal button { display: none; }
+}

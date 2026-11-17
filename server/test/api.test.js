@@ -179,7 +179,8 @@ test('admin accounts: roles, password rules, settings, group override', async ()
   const p = await register('allexp');
   assert.equal(p.player.group, 'experimental');
   await j('PUT', '/admin/settings', { controlRatio: 0.5 }, admin);
-  const ov = await j('PUT', `/admin/players/${p.player.id}/group`, { group: 'control' }, edu.token);
+  assert.equal((await j('PUT', `/admin/players/${p.player.id}/group`, { group: 'control' }, edu.token)).status, 404, 'educators only manage students in their own sections');
+  const ov = await j('PUT', `/admin/players/${p.player.id}/group`, { group: 'control' }, admin);
   assert.equal(ov.body.group, 'control');
   assert.equal(ov.body.groupSource, 'admin');
   const me = (await j('GET', '/admin/me', null, admin)).body;

@@ -55,7 +55,7 @@ export function createRepo(driver) {
     async deletePlayer(id) { return (await driver.query('DELETE FROM players WHERE id = $1', [id])).rowCount > 0; },
     async listPlayersWithStats() {
       return q(`
-        SELECT p.id, p.nickname, p.group_name, p.group_source, p.consent_at, p.created_at,
+        SELECT p.id, p.nickname, p.group_name, p.group_source, p.consent_at, p.created_at, p.section_id, (SELECT name FROM sections x WHERE x.id = p.section_id) AS section_name,
           (SELECT COUNT(*) FROM game_sessions s WHERE s.player_id = p.id AND s.finished_at IS NOT NULL) AS sessions,
           (SELECT COALESCE(SUM(score),0) FROM game_sessions s WHERE s.player_id = p.id) AS total_score,
           (SELECT COALESCE(MAX(level),0) FROM game_sessions s WHERE s.player_id = p.id) AS max_level,
@@ -176,6 +176,7 @@ export function createRepo(driver) {
       return one('UPDATE sections SET name = COALESCE($2, name), owner_admin_id = COALESCE($3, owner_admin_id) WHERE id = $1 RETURNING *', [id, name ?? null, ownerAdminId ?? null]);
     },
     async deleteSection(id) { return (await driver.query('DELETE FROM sections WHERE id = $1', [id])).rowCount > 0; },
+    async listPlayerSections() { return q('SELECT id, section_id FROM players WHERE section_id IS NOT NULL'); },
     async setPlayerSection(playerId, sectionId) { await q('UPDATE players SET section_id = $2 WHERE id = $1', [playerId, sectionId]); },
     async classLeaderboard() {
       return q(`SELECT sec.id, sec.name, COUNT(DISTINCT p.id) AS members,
@@ -220,7 +221,7 @@ export function createRepo(driver) {
       return repo.getSession(id);
     },
     async listAnswersExport() {
-      return q(`SELECT a.id, a.session_id, p.nickname, p.group_name, a.scenario_id, sc.difficulty, sc.channel, sc.language, sc.is_phishing, s.mode, a.choice, a.is_correct, a.link_clicked, a.time_ms, a.flags_found, a.false_clicks, a.points, a.created_at
+      return q(`SELECT a.id, a.session_id, s.player_id, p.nickname, p.group_name, s.level, a.scenario_id, sc.difficulty, sc.channel, sc.language, sc.is_phishing, s.mode, a.choice, a.is_correct, a.link_clicked, a.time_ms, a.flags_found, a.false_clicks, a.points, a.created_at
         FROM answers a JOIN game_sessions s ON s.id=a.session_id JOIN players p ON p.id=s.player_id LEFT JOIN scenarios sc ON sc.id=a.scenario_id ORDER BY a.id`);
     },
 
