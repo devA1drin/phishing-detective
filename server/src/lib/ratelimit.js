@@ -13,3 +13,5 @@ const make = (windowMs, limit, message) => rateLimit({
 export const authLimiter = make(15 * 60_000, 20, 'Too many sign-in attempts. Please wait 15 minutes and try again.');
 export const answerLimiter = make(60_000, 90, 'Too many answers too quickly. Slow down, Detective.');
 export const generalLimiter = make(60_000, 300, 'Too many requests. Please slow down.');
+export const aiLimiter = make(60 * 60_000, 30, 'AI generation limit reached for this hour. Try again later.');
+export const coachLimiter = make(60_000, 40, 'Coach is resting for a moment. Try again shortly.');

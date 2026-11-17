@@ -53,7 +53,7 @@ function Dashboard({ token, onLogout }) {
   };
   useEffect(() => { load(); }, []); // eslint-disable-line
 
-  const tabs = [['overview', '📊 Overview'], ['scenarios-stats', '🎯 Miss rates'], ['players', '🕵️ Players'], ['sessions', '🎮 Sessions'], ['manage', '🗂 Scenario bank'], ['study', '⚙️ Study & accounts']];
+  const tabs = [['overview', '📊 Overview'], ['scenarios-stats', '🎯 Miss rates'], ['players', '🕵️ Players'], ['sessions', '🎮 Sessions'], ['manage', '🗂 Scenario bank'], ['ai', `🤖 AI drafts${data.stats?.pendingScenarios ? ` (${data.stats.pendingScenarios})` : ''}`], ['study', '⚙️ Study & accounts']];
   return (
     <div className="admin">
       <div className="admin-head">
@@ -76,6 +76,7 @@ function Dashboard({ token, onLogout }) {
           {tab === 'sessions' && <Sessions rows={data.sessions} />}
           {tab === 'manage' && <ScenarioManager token={token} scenarios={data.scenarios} reload={load} />}
           {tab === 'study' && <StudyAdmin token={token} me={data.me} />}
+          {tab === 'ai' && <AiStudio token={token} reload={load} />}
         </>
       )}
     </div>
@@ -379,6 +380,93 @@ function Sessions({ rows }) {
   );
 }
 
+const AI_FORM = { channel: 'sms', difficulty: 2, isPhishing: true, language: 'taglish', topic: '', count: 1 };
+
+function Draft({ s, token, onDone }) {
+  const [err, setErr] = useState('');
+  const [busy, setBusy] = useState(false);
+  const preview = useMemo(() => {
+    const segs = [];
+    s.body.split(/(\{\{link:\d+\}\})/).forEach((chunk, i) => {
+      const m = chunk.match(/^\{\{link:(\d+)\}\}$/);
+      if (m) segs.push({ type: 'link', index: Number(m[1]) });
+      else chunk.split(/(\n+)/).forEach((part, j) => part && segs.push(/^\n+$/.test(part) ? { type: 'break', text: part } : { type: 'text', text: part, id: `d${i}-${j}` }));
+    });
+    return { ...s, segments: segs };
+  }, [s]);
+  const review = async (status) => {
+    setBusy(true); setErr('');
+    try { await api.admin.reviewScenario(token, s.id, status); onDone(); } catch (e) { setErr([e.message, ...(e.details || [])].join(' · ')); } finally { setBusy(false); }
+  };
+  return (
+    <div className="card draft">
+      <div className="draft-head">
+        <div><code>{s.id}</code> <span className="pill">{s.channel}</span> <span className="pill">{'★'.repeat(s.difficulty)}</span> <span className={`pill ${s.isPhishing ? 'pill-red' : 'pill-green'}`}>{s.isPhishing ? 'Phishing' : 'Legit'}</span> <span className="pill">{s.language}</span></div>
+        <span className="muted small">{s.aiModel} · {s.createdAt}</span>
+      </div>
+      <div className="draft-grid">
+        <MessageView scenario={preview} />
+        <div>
+          {s.redFlags.length > 0 ? <><h4>🚩 Red flags</h4><ol className="small">{s.redFlags.map((f, i) => <li key={i}><b>{f.label}</b> <span className="muted">({f.target}{f.match ? `: "${f.match}"` : ''})</span><br />{f.detail}</li>)}</ol></>
+            : <><h4>✅ Safe signs</h4><ul className="small">{s.safeSigns.map((x) => <li key={x}>{x}</li>)}</ul></>}
+          <p className="small">💡 {s.explanation}</p>
+          {err && <p className="error small">{err}</p>}
+          <div className="form-row">
+            <button className="btn btn-green" disabled={busy} onClick={() => review('approved')}>✓ Approve &amp; publish</button>
+            <button className="btn btn-danger" disabled={busy} onClick={() => review('rejected')}>✕ Reject</button>
+          </div>
+          <p className="muted small">Check facts, tone and that no real person's data appears. To edit, open it in the Scenario bank, then approve here.</p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function AiStudio({ token, reload }) {
+  const [status, setStatus] = useState(null);
+  const [form, setForm] = useState(AI_FORM);
+  const [drafts, setDrafts] = useState([]);
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState('');
+  const [err, setErr] = useState('');
+  const load = async () => {
+    try { setStatus(await api.admin.aiStatus(token)); setDrafts(await api.admin.scenariosByStatus(token, 'pending')); } catch (e) { setErr(e.message); }
+  };
+  useEffect(() => { load(); }, []); // eslint-disable-line
+  const generate = async () => {
+    setBusy(true); setErr(''); setMsg('');
+    try {
+      const r = await api.admin.aiGenerate(token, { ...form, isPhishing: form.isPhishing === true || form.isPhishing === 'true', count: Number(form.count) });
+      setMsg(`Generated ${r.drafts.length} draft${r.drafts.length > 1 ? 's' : ''}. Review below: nothing goes live until approved.`);
+      load(); reload();
+    } catch (e) { setErr(e.message); load(); } finally { setBusy(false); }
+  };
+  const set = (k) => (e) => setForm({ ...form, [k]: e.target.value });
+  return (
+    <div className="overview">
+      <div className="card">
+        <h3>🤖 AI scenario generator</h3>
+        {!status ? <p className="muted">Checking AI…</p> : status.enabled
+          ? <p className="small good">Connected through Vercel AI Gateway · model <code>{status.model}</code> · auth {status.auth}{status.lastError && <span className="bad"> · last error: {status.lastError.message}</span>}</p>
+          : <p className="small bad">AI is unavailable: {status.reason} Players still get static coach tips; everything else works.</p>}
+        <div className="form-row">
+          <label>Channel<select value={form.channel} onChange={set('channel')}><option value="sms">SMS</option><option value="email">Email</option><option value="social">Social DM</option><option value="call">Phone call</option></select></label>
+          <label>Verdict<select value={String(form.isPhishing)} onChange={(e) => setForm({ ...form, isPhishing: e.target.value === 'true' })}><option value="true">Phishing</option><option value="false">Legit</option></select></label>
+          <label>Difficulty<select value={form.difficulty} onChange={set('difficulty')}><option value={1}>1</option><option value={2}>2</option><option value={3}>3</option></select></label>
+          <label>Language<select value={form.language} onChange={set('language')}><option value="taglish">Taglish</option><option value="tl">Filipino</option><option value="en">English</option></select></label>
+          <label className="grow">Topic (optional)<input value={form.topic} onChange={set('topic')} placeholder="e.g. PhilHealth contribution refund, enrollment portal" maxLength={200} /></label>
+          <label>How many<select value={form.count} onChange={set('count')}><option>1</option><option>2</option><option>3</option></select></label>
+          <button className="btn btn-gold" disabled={busy || !status?.enabled} onClick={generate}>{busy ? 'Generating…' : 'Generate drafts'}</button>
+        </div>
+        {msg && <p className="good small">{msg}</p>}{err && <p className="error small">{err}</p>}
+      </div>
+      <h3>Pending review ({drafts.length})</h3>
+      {drafts.length === 0 ? <p className="muted">No drafts waiting. Generated scenarios appear here and go live only after an educator approves them.</p>
+        : drafts.map((d) => <Draft key={d.id} s={d} token={token} onDone={() => { load(); reload(); }} />)}
+    </div>
+  );
+}
+
 const EMPTY = {
   id: '', channel: 'email', platform: '', difficulty: 1, isPhishing: true, senderName: '', senderAddress: '', subject: '',
   body: '', links: [], attachments: [], redFlags: [], safeSigns: [], explanation: '', active: true, language: 'en',
@@ -417,7 +505,7 @@ function ScenarioManager({ token, scenarios, reload }) {
                 <td><span className={`pill ${s.isPhishing ? 'pill-red' : 'pill-green'}`}>{s.isPhishing ? 'Phishing' : 'Legit'}</span></td>
                 <td><b>{s.senderName}</b><div className="small muted">{s.subject || s.body.slice(0, 60) + '…'}</div></td>
                 <td className="num">{s.redFlags.length}</td>
-                <td>{s.active ? 'Active' : <span className="muted">Inactive</span>}</td>
+                <td>{s.status && s.status !== 'approved' ? <span className={`pill ${s.status === 'pending' ? '' : 'pill-red'}`}>{s.status}</span> : s.active ? 'Active' : <span className="muted">Inactive</span>}{s.source === 'ai' && <div className="muted small">🤖 AI</div>}</td>
                 <td className="row-actions"><button className="btn btn-sm" onClick={() => { setIsNew(false); setEditing(s); }}>Edit</button><button className="btn btn-sm btn-danger" onClick={() => remove(s.id)}>Delete</button></td>
               </tr>
             ))}

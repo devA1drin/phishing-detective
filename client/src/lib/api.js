@@ -32,6 +32,7 @@ export const api = {
   finish: (sessionId) => p('POST', `/api/sessions/${sessionId}/finish`),
   quiz: (kind) => request('GET', `/api/quiz/${kind}`),
   submitQuiz: (kind, answers) => p('POST', `/api/quiz/${kind}/submit`, { answers }),
+  coach: (sessionId, payload) => p('POST', `/api/sessions/${sessionId}/coach`, payload),
   surveyItems: () => request('GET', '/api/surveys/items'),
   submitSurvey: (kind, answers) => p('POST', `/api/surveys/${kind}`, { answers }),
   admin: {
@@ -47,6 +48,10 @@ export const api = {
     createScenario: (t, s) => request('POST', '/api/admin/scenarios', s, t),
     updateScenario: (t, id, s) => request('PUT', `/api/admin/scenarios/${id}`, s, t),
     deleteScenario: (t, id) => request('DELETE', `/api/admin/scenarios/${id}`, undefined, t),
+    aiStatus: (t) => request('GET', '/api/admin/ai/status', undefined, t),
+    aiGenerate: (t, opts) => request('POST', '/api/admin/ai/generate', opts, t),
+    reviewScenario: (t, id, status) => request('POST', `/api/admin/scenarios/${id}/review`, { status }, t),
+    scenariosByStatus: (t, status) => request('GET', `/api/admin/scenarios?status=${status}`, undefined, t),
     admins: (t) => request('GET', '/api/admin/admins', undefined, t),
     createAdmin: (t, a) => request('POST', '/api/admin/admins', a, t),
     updateAdmin: (t, id, a) => request('PUT', `/api/admin/admins/${id}`, a, t),

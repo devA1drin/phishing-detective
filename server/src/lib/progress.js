@@ -1,6 +1,7 @@
 // Study-flow rules shared by routes: who can play, which quizzes are unlocked.
 import { parseTs } from '../db/drivers/common.js';
 import { unlockedLevels, rankFor, MAX_LEVEL, UNLOCK_ACCURACY } from './game.js';
+import { weakCategories } from './categories.js';
 
 const DAY = 86_400_000;
 const percent = (a) => Math.round((100 * a.score) / a.total);
@@ -10,6 +11,7 @@ export async function buildProgress(repo, player) {
   const sessions = await repo.listPlayerSessions(player.id);
   const quizzes = await repo.listPlayerQuizAttempts(player.id);
   const surveys = await repo.listPlayerSurveys(player.id);
+  const categoryStats = await repo.getCategoryStats(player.id);
   const finished = sessions.filter((s) => s.finishedAt);
   const group = player.group_name || 'experimental';
   const pre = quizzes.find((x) => x.kind === 'pre');
@@ -37,6 +39,7 @@ export async function buildProgress(repo, player) {
       const ls = finished.filter((s) => s.level === lvl && s.answered);
       return { level: lvl, bestAccuracy: ls.length ? Math.max(...ls.map((s) => Math.round((100 * s.correct) / s.answered))) : null, bestScore: ls.length ? Math.max(...ls.map((s) => s.score)) : null };
     }),
+    weakSpots: weakCategories(categoryStats, { min: 2, top: 3 }),
     reading: { required: group === 'control', done: readingDone },
     preQuiz: pre ? { score: pre.score, total: pre.total, percent: percent(pre) } : null,
     postQuiz: posts.length ? { score: posts[0].score, total: posts[0].total, percent: percent(posts[0]), attempts: posts.length } : null,

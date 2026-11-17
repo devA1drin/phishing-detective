@@ -138,7 +138,7 @@ export default function Inbox() {
             </div>
           )}
           {locked[current.id] && !results && <p className="bad small">🎣 You opened this message's scam link, so this case is lost. Sort the rest!</p>}
-          {res && <Feedback f={res} />}
+          {res && <Feedback f={res} sessionId={session.sessionId} scenarioId={current.id} />}
         </div>
       </div>
     </div>

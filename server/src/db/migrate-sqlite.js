@@ -88,6 +88,22 @@ export const sqliteMigrations = [
       db.exec('CREATE INDEX IF NOT EXISTS idx_scenarios_language ON scenarios(language)');
     },
   },
+  {
+    id: '0004_phase3_ai',
+    up(db) {
+      addColumn(db, 'scenarios', 'status', "TEXT NOT NULL DEFAULT 'approved' CHECK (status IN ('approved','pending','rejected'))");
+      addColumn(db, 'scenarios', 'source', "TEXT NOT NULL DEFAULT 'seed'");
+      addColumn(db, 'scenarios', 'ai_model', 'TEXT');
+      addColumn(db, 'scenarios', 'created_by', 'INTEGER REFERENCES admins(id) ON DELETE SET NULL');
+      addColumn(db, 'scenarios', 'reviewed_by', 'INTEGER REFERENCES admins(id) ON DELETE SET NULL');
+      addColumn(db, 'scenarios', 'reviewed_at', 'TEXT');
+      db.exec('CREATE INDEX IF NOT EXISTS idx_scenarios_status ON scenarios(status)');
+      db.exec(`CREATE TABLE IF NOT EXISTS player_category_stats (
+        player_id INTEGER NOT NULL REFERENCES players(id) ON DELETE CASCADE,
+        category TEXT NOT NULL, seen INTEGER NOT NULL DEFAULT 0, missed INTEGER NOT NULL DEFAULT 0,
+        updated_at TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP), PRIMARY KEY (player_id, category))`);
+    },
+  },
 ];
 
 export function migrateSqlite(db) {

@@ -1,7 +1,9 @@
 import { Router } from 'express';
 import { issueAdminToken, requireAdmin } from '../lib/auth.js';
 import { hashPassword, checkHash, validatePassword } from '../lib/admins.js';
-import { authLimiter } from '../lib/ratelimit.js';
+import { authLimiter, aiLimiter } from '../lib/ratelimit.js';
+import { aiStatus, generateScenario } from '../lib/ai.js';
+import { randomBytes } from 'node:crypto';
 import { toCsv } from '../lib/csv.js';
 import { segmentBody, flagPartKeys } from '../lib/game.js';
 import { groupComparison, confidenceStats, surveyStats, firstScores } from '../lib/analytics.js';
@@ -148,6 +150,7 @@ export default function adminRouter(repo) {
       confidence: confidenceStats(attempts),
       surveys: surveyStats(await repo.listSurveys()),
       settings: await repo.getSettings(),
+      pendingScenarios: await repo.countPendingScenarios(),
       byLevel: t.byLevel, byChannel: t.byChannel,
     });
   });
@@ -175,8 +178,48 @@ export default function adminRouter(repo) {
     res.send(toCsv(rows));
   });
 
+  // ── AI scenario generator (drafts need educator approval) ──
+  r.get('/admin/ai/status', async (_req, res) => res.json({ ...aiStatus(), pending: await repo.countPendingScenarios() }));
+  r.post('/admin/ai/generate', aiLimiter, async (req, res) => {
+    const b = req.body || {};
+    const opts = {
+      channel: ['email', 'sms', 'social', 'call'].includes(b.channel) ? b.channel : 'sms',
+      difficulty: [1, 2, 3].includes(Number(b.difficulty)) ? Number(b.difficulty) : 2,
+      isPhishing: b.isPhishing !== false,
+      language: ['en', 'tl', 'taglish'].includes(b.language) ? b.language : 'en',
+      topic: String(b.topic || '').slice(0, 200),
+    };
+    const count = Math.min(Math.max(Number(b.count) || 1, 1), 3);
+    const st = aiStatus();
+    if (!st.enabled) return res.status(503).json({ error: st.reason, ai: st });
+    const drafts = [];
+    try {
+      for (let i = 0; i < count; i++) {
+        const { scenario, model } = await generateScenario(opts);
+        const id = `ai-${opts.channel}-${randomBytes(3).toString('hex')}`;
+        const draft = { ...scenario, id, active: false, status: 'pending', source: 'ai', aiModel: model, createdBy: req.admin.id };
+        const saved = await repo.createScenario(draft);
+        drafts.push({ ...saved, validationErrors: validateScenario(saved, { partial: true }) });
+      }
+    } catch (e) {
+      if (!drafts.length) return res.status(e.status || 502).json({ error: e.message, ai: aiStatus() });
+    }
+    res.status(201).json({ drafts });
+  });
+  r.post('/admin/scenarios/:id/review', async (req, res) => {
+    const status = req.body?.status;
+    if (!['approved', 'rejected'].includes(status)) return res.status(400).json({ error: 'status must be approved or rejected' });
+    const s = await repo.getScenario(req.params.id);
+    if (!s) return res.status(404).json({ error: 'Not found' });
+    if (status === 'approved') {
+      const errors = validateScenario(s, { partial: true });
+      if (errors.length) return res.status(400).json({ error: 'Fix these before approving', details: errors });
+    }
+    res.json(await repo.reviewScenario(s.id, status, req.admin.id));
+  });
+
   // Scenario CRUD
-  r.get('/admin/scenarios', async (_req, res) => res.json(await repo.listScenarios()));
+  r.get('/admin/scenarios', async (req, res) => res.json(await repo.listScenarios({ status: ['approved', 'pending', 'rejected'].includes(req.query.status) ? req.query.status : undefined })));
   r.get('/admin/scenarios/:id', async (req, res) => {
     const s = await repo.getScenario(req.params.id);
     s ? res.json(s) : res.status(404).json({ error: 'Not found' });

@@ -15,14 +15,14 @@ export const timeLimitFor = (s) => (TIME_LIMITS[s.difficulty] || 30) + (s.channe
 export const matchesLanguage = (s, filter) => !filter || filter === 'all' || (filter === 'en' ? (s.language || 'en') === 'en' : ['tl', 'taglish'].includes(s.language));
 
 /** Prefer scenarios in the chosen language; top up from the rest if the filtered pool is too small. */
-export function pickWithLanguage(all, level, size, filter) {
+export function pickWithLanguage(all, level, size, filter, weight = null) {
   const preferred = all.filter((s) => matchesLanguage(s, filter));
   if (preferred.length >= size) {
-    const picked = pickScenarios(preferred, level, size);
+    const picked = pickScenarios(preferred, level, size, weight);
     if (picked.length === size) return picked;
   }
   const first = shuffle(preferred).slice(0, size);
-  const rest = pickScenarios(all.filter((s) => !first.includes(s)), level, size - first.length);
+  const rest = pickScenarios(all.filter((s) => !first.includes(s)), level, size - first.length, weight);
   return shuffle([...first, ...rest]);
 }
 
@@ -35,16 +35,28 @@ export const shuffle = (arr) => {
   return a;
 };
 
-/** Pick a randomized round for a level, weighted towards that level's difficulty. */
-export function pickScenarios(all, level, size = ROUND_SIZE) {
+/**
+ * Weighted random order (Efraimidis-Spirakis): items with higher weight tend to come first,
+ * but every item can still appear. Used for adaptive selection.
+ */
+export function weightedShuffle(arr, weight) {
+  return arr.map((x) => ({ x, k: Math.random() ** (1 / Math.max(0.01, weight(x))) })).sort((a, b) => b.k - a.k).map((o) => o.x);
+}
+
+/**
+ * Pick a randomized round for a level, weighted towards that level's difficulty.
+ * `weight(scenario)` (optional) biases the pick, e.g. towards a player's weak categories.
+ */
+export function pickScenarios(all, level, size = ROUND_SIZE, weight = null) {
+  const order = (list) => (weight ? weightedShuffle(list, weight) : shuffle(list));
   const plan = { 1: { 1: size }, 2: { 2: 5, 1: 3 }, 3: { 3: 5, 2: 3 } }[level];
   const chosen = [];
   for (const [diff, n] of Object.entries(plan)) {
-    chosen.push(...shuffle(all.filter((s) => s.difficulty === Number(diff))).slice(0, n));
+    chosen.push(...order(all.filter((s) => s.difficulty === Number(diff))).slice(0, n));
   }
   chosen.splice(size);
   if (chosen.length < size) {
-    const rest = shuffle(all.filter((s) => !chosen.includes(s)));
+    const rest = order(all.filter((s) => !chosen.includes(s)));
     chosen.push(...rest.slice(0, size - chosen.length));
   }
   // Guarantee a mix: at least 2 legit and 2 phishing messages if available.

@@ -120,6 +120,7 @@ export default function Game() {
         <div className="hud-item"><span>Case</span><b>{idx + 1}/{session.scenarios.length}</b></div>
         <div className="hud-item"><span>Score</span><b className="gold">{score}</b></div>
         <div className="hud-item"><span>Streak</span><b>{streak > 0 ? `🔥 ${streak}` : '-'}</b></div>
+        {session.adaptive?.on && <div className="hud-item hide-sm" title="This round leans towards the red flags you miss most"><span>Training focus</span><b className="small">🎯 {session.adaptive.focus.join(', ') || 'mixed'}</b></div>}
         <div className="hud-timer">{!feedback ? <Timer remaining={remaining} limit={scenario.timeLimit} /> : <span className="muted small">Debrief</span>}</div>
       </div>
 
@@ -155,7 +156,7 @@ export default function Game() {
               </ul>
             </div>
           ) : (
-            <Feedback f={feedback} onNext={next} last={idx === session.scenarios.length - 1} />
+            <Feedback f={feedback} onNext={next} last={idx === session.scenarios.length - 1} sessionId={session.sessionId} scenarioId={scenario.id} />
           )}
         </aside>
       </div>
@@ -163,7 +164,25 @@ export default function Game() {
   );
 }
 
-export function Feedback({ f, onNext, last }) {
+function Coach({ sessionId, scenarioId, f }) {
+  const [c, setC] = useState(null);
+  useEffect(() => {
+    let alive = true;
+    const missed = f.redFlags.map((r, i) => (r.found ? null : i)).filter((x) => x != null);
+    api.coach(sessionId, { scenarioId, missed }).then((r) => alive && setC(r)).catch(() => alive && setC({ source: 'error' }));
+    return () => { alive = false; };
+  }, [sessionId, scenarioId]); // eslint-disable-line
+  if (c?.source === 'error') return null;
+  return (
+    <div className={`coach ${c?.source || ''}`}>
+      <b>{c?.source === 'ai' ? '🤖 AI coach' : '💡 Coach tip'}</b>
+      {!c ? <p className="small muted">Thinking about your answer…</p> : <p className="small">{c.text}</p>}
+      {c?.weakCategories?.length > 0 && <p className="small muted">Your weak spots: {c.weakCategories.join(', ')}</p>}
+    </div>
+  );
+}
+
+export function Feedback({ f, onNext, last, sessionId, scenarioId }) {
   return (
     <div className={`card feedback ${f.isCorrect ? 'correct' : 'wrong'}`}>
       <div className="fb-head">
@@ -200,6 +219,7 @@ export function Feedback({ f, onNext, last }) {
         </>
       )}
       <p className="explain">💡 {f.explanation}</p>
+      {sessionId && scenarioId && <Coach sessionId={sessionId} scenarioId={scenarioId} f={f} />}
       {onNext && <button className="btn btn-gold block" onClick={onNext}>{last ? 'See round summary →' : 'Next case →'} <kbd>Enter</kbd></button>}
     </div>
   );

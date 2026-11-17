@@ -152,6 +152,20 @@ export default function Hub() {
           )}
         </div>
         {p.postQuiz && retentionCard}
+        <div className="card">
+          <h3>🎯 Your weak spots</h3>
+          {p.weakSpots.length === 0 ? <p className="muted small">Play a few rounds and we'll show which red flags you miss most. Rounds then adapt to train them.</p> : (
+            <>
+              {p.weakSpots.map((w) => (
+                <div className="bar-row" key={w.category}>
+                  <span>{w.label}<small>{w.missed}/{w.seen} missed</small></span>
+                  <div className="bar"><div className="bar-fill miss" style={{ width: `${Math.round(w.weakness * 100)}%` }} /></div>
+                </div>
+              ))}
+              <p className="muted small">New rounds lean towards these so you practice where it counts.</p>
+            </>
+          )}
+        </div>
         {surveyCard}
         <div className="card">
           <h3>🏆 Top detectives</h3>

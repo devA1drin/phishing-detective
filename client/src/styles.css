@@ -389,3 +389,12 @@ label.checkbox { flex-direction: row; align-items: center; } label.checkbox inpu
 .msg-call .muted { color: var(--muted); }
 .msg-call .phone-sender { font-weight: 700; font-size: 1.05rem; }
 .msg-call .statusbar { background: rgba(255,255,255,.04); color: var(--muted); }
+
+/* Phase 3: coach, AI drafts */
+.coach { margin: 10px 0; padding: 10px 12px; border-radius: 12px; border: 1px dashed var(--line); background: rgba(90,169,255,.07); }
+.coach.ai { border-color: rgba(90,169,255,.5); }
+.coach p { margin: 4px 0 0; }
+.draft { margin-bottom: 14px; }
+.draft-head { display: flex; justify-content: space-between; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; }
+.draft-grid { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr); gap: 16px; }
+@media (max-width: 860px) { .draft-grid { grid-template-columns: minmax(0, 1fr); } }

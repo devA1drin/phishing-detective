@@ -3,6 +3,10 @@ import { pickScenarios, pickWithLanguage, publicScenario, scoreAnswer, unlockedL
 import { requirePlayer } from '../lib/auth.js';
 import { answerLimiter } from '../lib/ratelimit.js';
 import { buildProgress } from '../lib/progress.js';
+import { adaptiveWeight } from '../lib/adaptive.js';
+import { categoryOutcomes, weakCategories } from '../lib/categories.js';
+import { coachText } from '../lib/ai.js';
+import { coachLimiter } from '../lib/ratelimit.js';
 
 export default function gameRouter(repo) {
   const r = Router();
@@ -32,10 +36,11 @@ export default function gameRouter(repo) {
     const all = await repo.listScenarios({ activeOnly: true });
     if (all.length < 4) return res.status(500).json({ error: 'Not enough active scenarios' });
     const size = mode === 'inbox' ? INBOX_SIZES[level] : ROUND_SIZE;
-    const picked = pickWithLanguage(all, level, size, language);
+    const adaptive = adaptiveWeight(await repo.getCategoryStats(playerId));
+    const picked = pickWithLanguage(all, level, size, language, adaptive.weight);
     const session = await repo.createSession({ playerId, level, scenarioIds: picked.map((s) => s.id), mode, language });
     const scenarios = picked.map(publicScenario);
-    const out = { sessionId: session.id, level, mode, language, scenarios };
+    const out = { sessionId: session.id, level, mode, language, scenarios, adaptive: { on: !!adaptive.weight, focus: adaptive.focus.map((f) => f.label) } };
     // Inbox: one shared clock for the whole inbox (80% of the per-message limits combined)
     if (mode === 'inbox') out.inboxTimeLimit = Math.round(scenarios.reduce((a, x) => a + x.timeLimit, 0) * 0.8);
     res.status(201).json(out);
@@ -94,8 +99,28 @@ export default function gameRouter(repo) {
       timeMs: result.timeMs, flagsFound: result.flagsFound, falseClicks: result.falseClicks, points: result.points, linkClicked,
     }, update);
     Object.assign(session, update); // keep the in-memory copy current for callers
+    await repo.bumpCategoryStats(session.playerId, categoryOutcomes(scenario, result));
     return { ...result, linkClicked, sessionScore: update.score, streak: update.currentStreak, answered: update.answered, total: session.scenarioIds.length };
   }
+
+  // AI coach: personalised explanation for an answered case (static tip if AI is unavailable)
+  r.post('/sessions/:id/coach', requirePlayer, coachLimiter, async (req, res) => {
+    const session = await repo.getSession(Number(req.params.id));
+    if (!session || session.playerId !== req.playerId) return res.status(404).json({ error: 'Session not found' });
+    const { scenarioId, missed = [] } = req.body || {};
+    const answer = await repo.getAnswer(session.id, scenarioId);
+    if (!answer) return res.status(409).json({ error: 'Answer the case first' });
+    const scenario = await repo.getScenario(scenarioId);
+    if (!scenario) return res.status(404).json({ error: 'Scenario no longer exists' });
+    const missedSet = new Set((Array.isArray(missed) ? missed : []).map(Number));
+    const result = {
+      isCorrect: !!answer.is_correct, timedOut: answer.choice == null, phished: !!answer.link_clicked && !answer.is_correct,
+      redFlags: (scenario.redFlags || []).map((f, i) => ({ ...f, found: answer.is_correct ? !missedSet.has(i) : false })),
+    };
+    const weak = weakCategories(await repo.getCategoryStats(session.playerId));
+    const coach = await coachText({ scenario, result, weak });
+    res.json({ ...coach, weakCategories: weak.map((w) => w.label) });
+  });
 
   // Finish a round and get the summary
   r.post('/sessions/:id/finish', requirePlayer, async (req, res) => {

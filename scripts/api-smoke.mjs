@@ -18,6 +18,7 @@ const call = async (method, path, body, token, expect) => {
 const ok = (label, extra = '') => console.log(`✔ ${label}${extra ? `: ${extra}` : ''}`);
 const answers = (kind, items) => items.map((i, n) => ({ itemId: i.id, choice: (n % 4 === 0) !== quizPools[kind].find((q) => q.id === i.id).isPhishing ? 'phishing' : 'legit', confidence: 1 + (n % 5) }));
 
+const aiDrafts = [];
 let admin, playerId;
 try {
   const h = await call('GET', '/health'); ok('health', JSON.stringify(h));
@@ -43,7 +44,9 @@ try {
     const t = scenarios.find((x) => x.id === sc.id);
     await call('POST', `/sessions/${s.sessionId}/answers`, { scenarioId: sc.id, choice: t ? (t.isPhishing ? 'phishing' : 'legit') : 'phishing', timeMs: 6000, clickedParts: [] }, token);
   }
-  const fin = await call('POST', `/sessions/${s.sessionId}/finish`, null, token); ok('round', `score ${fin.score}, accuracy ${fin.accuracy}%`);
+  const coach = await call('POST', `/sessions/${s.sessionId}/coach`, { scenarioId: s.scenarios[0].id, missed: [] }, token);
+  ok('coach', `${coach.source} (${coach.text.length} chars)`);
+  const fin = await call('POST', `/sessions/${s.sessionId}/finish`, null, token); ok('round', `score ${fin.score}, accuracy ${fin.accuracy}%, adaptive ${s.adaptive?.on}`);
   // Phase 2: inbox mode + language filter + link trap
   const inbox = await call('POST', '/sessions', { level: 1, mode: 'inbox', language: 'fil' }, token, 201);
   ok('inbox (Filipino/Taglish)', `${inbox.scenarios.length} messages, ${inbox.inboxTimeLimit}s, languages ${[...new Set(inbox.scenarios.map((x) => x.language))].join('/')}`);
@@ -63,7 +66,19 @@ try {
     ok(`CSV ${k}`, `${csv.split('\n').length - 1} rows`);
   }
   await call('GET', '/admin/admins', null, admin); ok('admin accounts list');
+  const ai = await call('GET', '/admin/ai/status', null, admin);
+  ok('AI status', ai.enabled ? `enabled, ${ai.model} via ${ai.auth}` : `disabled: ${ai.reason}`);
+  if (ai.enabled && process.env.SMOKE_AI_GENERATE === '1') {
+    const res = await fetch(`${BASE}/admin/ai/generate`, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${admin}` }, body: JSON.stringify({ channel: 'sms', difficulty: 2, isPhishing: true, language: 'taglish', topic: 'smoke test', count: 1 }) });
+    const g = await res.json();
+    if (res.status === 201) {
+      aiDrafts.push(...g.drafts.map((d) => d.id));
+      const d = g.drafts[0];
+      ok('AI generate', `${d.id} status=${d.status} active=${d.active} validation=${d.validationErrors.length ? d.validationErrors.join('; ') : 'ok'}`);
+    } else console.log(`✖ AI generate: HTTP ${res.status} ${g.error}`);
+  }
 } finally {
+  for (const id of aiDrafts) { await call('DELETE', `/admin/scenarios/${id}`, null, admin, 204).catch((e) => console.log('draft cleanup failed', e.message)); ok('cleanup', `deleted smoke AI draft ${id}`); }
   if (admin && playerId) { await call('DELETE', `/admin/players/${playerId}`, null, admin, 204); ok('cleanup', `deleted smoke player #${playerId}`); }
 }
 console.log('ALL OK');

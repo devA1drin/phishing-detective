@@ -5,7 +5,8 @@ const toScenario = (r) => r && ({
   isPhishing: !!r.is_phishing, senderName: r.sender_name, senderAddress: r.sender_address,
   subject: r.subject || undefined, body: r.body, links: r.links || [], attachments: r.attachments || [],
   redFlags: r.red_flags || [], safeSigns: r.safe_signs || [], explanation: r.explanation, active: !!r.active,
-  language: r.language || 'en',
+  language: r.language || 'en', status: r.status || 'approved', source: r.source || 'seed',
+  aiModel: r.ai_model || undefined, createdBy: r.created_by ?? undefined, reviewedBy: r.reviewed_by ?? undefined, reviewedAt: r.reviewed_at || undefined,
   createdAt: r.created_at, updatedAt: r.updated_at,
 });
 
@@ -84,19 +85,45 @@ export function createRepo(driver) {
     },
 
     // ── scenarios ──
-    async listScenarios({ activeOnly = false } = {}) {
-      return (await q(`SELECT * FROM scenarios ${activeOnly ? 'WHERE active = true' : ''} ORDER BY difficulty, id`)).map(toScenario);
+    /** activeOnly = what players can be served: active AND approved (pending AI drafts never leak). */
+    async listScenarios({ activeOnly = false, status } = {}) {
+      const where = [];
+      const params = [];
+      if (activeOnly) where.push("active = true AND status = 'approved'");
+      if (status) { params.push(status); where.push(`status = $${params.length}`); }
+      return (await q(`SELECT * FROM scenarios ${where.length ? `WHERE ${where.join(' AND ')}` : ''} ORDER BY difficulty, id`, params)).map(toScenario);
     },
     async getScenario(id) { return toScenario(await one('SELECT * FROM scenarios WHERE id = $1', [id])); },
     async createScenario(s) {
-      await q(`INSERT INTO scenarios (id, channel, platform, difficulty, is_phishing, sender_name, sender_address, subject, body, links, attachments, red_flags, safe_signs, explanation, active, language)
-        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)`, scenarioValues(s));
+      await q(`INSERT INTO scenarios (id, channel, platform, difficulty, is_phishing, sender_name, sender_address, subject, body, links, attachments, red_flags, safe_signs, explanation, active, language, status, source, ai_model, created_by)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)`,
+      [...scenarioValues(s), s.status || 'approved', s.source || 'admin', s.aiModel || null, s.createdBy || null]);
       return repo.getScenario(s.id);
     },
     /** Insert a seed scenario unless that id exists (safe under concurrent cold starts). */
     async insertScenarioIfMissing(s) {
       return (await driver.query(`INSERT INTO scenarios (id, channel, platform, difficulty, is_phishing, sender_name, sender_address, subject, body, links, attachments, red_flags, safe_signs, explanation, active, language)
         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16) ON CONFLICT (id) DO NOTHING`, scenarioValues(s))).rowCount > 0;
+    },
+    /** Educator review of a (usually AI-generated) draft. Approve makes it live. */
+    async reviewScenario(id, status, adminId) {
+      const rows = await q(`UPDATE scenarios SET status = $2, active = $3, reviewed_by = $4, reviewed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+        WHERE id = $1 RETURNING id`, [id, status, status === 'approved', adminId]);
+      return rows.length ? repo.getScenario(id) : null;
+    },
+    async countPendingScenarios() { return (await one("SELECT COUNT(*) AS c FROM scenarios WHERE status = 'pending'")).c; },
+
+    // ── adaptive learning: weakness per red-flag category ──
+    async bumpCategoryStats(playerId, outcomes) {
+      for (const o of outcomes) {
+        await q(`INSERT INTO player_category_stats (player_id, category, seen, missed) VALUES ($1, $2, 1, $3)
+          ON CONFLICT (player_id, category) DO UPDATE SET seen = player_category_stats.seen + 1,
+            missed = player_category_stats.missed + excluded.missed, updated_at = CURRENT_TIMESTAMP`, [playerId, o.category, o.missed ? 1 : 0]);
+      }
+    },
+    async getCategoryStats(playerId) { return q('SELECT category, seen, missed FROM player_category_stats WHERE player_id = $1', [playerId]); },
+    async listCategoryStats() {
+      return q('SELECT c.player_id, p.nickname, c.category, c.seen, c.missed FROM player_category_stats c JOIN players p ON p.id = c.player_id ORDER BY c.player_id, c.category');
     },
     async updateScenario(id, s) {
       const rows = await q(`UPDATE scenarios SET channel=$2, platform=$3, difficulty=$4, is_phishing=$5, sender_name=$6, sender_address=$7,
